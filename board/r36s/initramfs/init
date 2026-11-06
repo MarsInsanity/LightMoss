@@ -223,9 +223,8 @@ update() {
 			rm -rf /mnt/old/etc/dropbear
 			cp -a /tmp/keep/dropbear /mnt/old/etc/dropbear
 		fi
-		# SPRUCEOS is already there: no first-boot partitioning.
-		mkdir -p /mnt/old/var/lib/lightmoss
-		touch /mnt/old/var/lib/lightmoss/firstboot.done
+		# First boot runs again: it leaves an existing SPRUCEOS as it is,
+		# and adds it to an eMMC that never got that far.
 		umount /mnt/old
 	fi
 
