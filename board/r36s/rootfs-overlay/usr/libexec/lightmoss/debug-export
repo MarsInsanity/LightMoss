@@ -31,6 +31,9 @@ dmesg                       > "$OUT/dmesg.log"         2>/dev/null
 	echo; echo "--- usb"; lsusb 2>&1
 	echo; echo "--- sound"; cat /proc/asound/cards; amixer controls 2>&1 | head -40
 	echo; echo "--- input"; cat /proc/bus/input/devices
+	echo; echo "--- suspend"; echo "states: $(cat /sys/power/state)"
+	cat /sys/kernel/debug/suspend_stats 2>&1
+	echo; echo "--- wakeup sources"; cat /sys/kernel/debug/wakeup_sources 2>&1 | awk 'NR == 1 || $2 > 0'
 } > "$OUT/system.txt" 2>&1
 
 [ -f /mnt/SDCARD/Saves/spruce/spruce.log ] && cp -f /mnt/SDCARD/Saves/spruce/spruce.log "$OUT/" 2>/dev/null
