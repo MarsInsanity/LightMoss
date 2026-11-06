@@ -20,7 +20,7 @@ O32          ?= $(O)-lib32
 DEFCONFIG    ?= lightmoss_r36s_defconfig
 DEFCONFIG32  ?= lightmoss_r36s_lib32_defconfig
 
-BR_MAKE   = $(MAKE) -C $(BR_DIR) O=$(O) BR2_EXTERNAL=$(CURDIR) LIGHTMOSS_LIB32_DIR=$(O32)
+BR_MAKE   = $(MAKE) -C $(BR_DIR) O=$(O) BR2_EXTERNAL=$(CURDIR) LM_LIB32_OUTPUT=$(O32)
 BR32_MAKE = $(MAKE) -C $(BR_DIR) O=$(O32) BR2_EXTERNAL=$(CURDIR)
 
 .PHONY: all lib32 buildroot config

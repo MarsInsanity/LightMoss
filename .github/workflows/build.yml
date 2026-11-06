@@ -43,7 +43,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq build-essential rsync cpio bc unzip wget file \
-                                      python3 git xz-utils
+                                      python3 git xz-utils qemu-user-static
 
       - name: Version
         id: version

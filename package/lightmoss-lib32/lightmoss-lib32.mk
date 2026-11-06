@@ -6,10 +6,10 @@
 
 # The lib32 build's output directory: output -> output-lib32 by default, as
 # the top-level Makefile builds it.
-LIGHTMOSS_LIB32_DIR ?= $(BASE_DIR)-lib32
+LM_LIB32_OUTPUT ?= $(BASE_DIR)-lib32
 
 LIGHTMOSS_LIB32_VERSION = 1.0
-LIGHTMOSS_LIB32_SITE = $(LIGHTMOSS_LIB32_DIR)/target
+LIGHTMOSS_LIB32_SITE = $(LM_LIB32_OUTPUT)/target
 LIGHTMOSS_LIB32_SITE_METHOD = local
 LIGHTMOSS_LIB32_LICENSE = various (see the lib32 build's legal-info)
 
@@ -21,8 +21,8 @@ LIGHTMOSS_LIB32_BIN_ARCH_EXCLUDE = $(LIGHTMOSS_LIB32_LIBDIR) /usr/lib/ld-linux-a
 # /usr/lib), with their soname links; nothing else (no programs, no config).
 define LIGHTMOSS_LIB32_INSTALL_TARGET_CMDS
 	@test -e $(@D)/lib/ld-linux-armhf.so.3 || { \
-		echo "lightmoss-lib32: no armhf runtime in $(LIGHTMOSS_LIB32_DIR)"; \
-		echo "  build it first: make lib32 (or set LIGHTMOSS_LIB32_DIR)"; exit 1; }
+		echo "lightmoss-lib32: no armhf runtime in $(LM_LIB32_OUTPUT)"; \
+		echo "  build it first: make lib32 (or set LM_LIB32_OUTPUT)"; exit 1; }
 	rm -rf $(TARGET_DIR)$(LIGHTMOSS_LIB32_LIBDIR)
 	mkdir -p $(TARGET_DIR)$(LIGHTMOSS_LIB32_LIBDIR)
 	for d in lib usr/lib; do \

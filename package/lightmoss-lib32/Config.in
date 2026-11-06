@@ -9,6 +9,6 @@ config BR2_PACKAGE_LIGHTMOSS_LIB32
 	  /lib/ld-linux-armhf.so.3 (Debian's paths). For PortMaster
 	  ports and spruce cores that only exist as armhf binaries.
 
-	  The lib32 build must be done first, into LIGHTMOSS_LIB32_DIR
+	  The lib32 build must be done first, into LM_LIB32_OUTPUT
 	  (default: this build's output directory with "-lib32"
 	  appended); the top-level Makefile does that.
