@@ -143,6 +143,8 @@ mount --bind / "$mnt/src"
 cp -a "$mnt/src/." "$mnt/root/"
 umount "$mnt/src"
 rm -rf "$mnt/root/var/log/journal/"*
+# First boot runs on the eMMC: it adds SPRUCEOS, or finds it there already.
+rm -f "$mnt/root/var/lib/lightmoss/firstboot.done"
 if [ "$mode" = update ]; then
 	# The installed system's identity, back in place.
 	[ -e "$mnt/keep/machine-id" ] && cp -a "$mnt/keep/machine-id" "$mnt/root/etc/machine-id"
@@ -153,7 +155,7 @@ if [ "$mode" = update ]; then
 else
 	# A fresh identity and a fresh first boot (it adds SPRUCEOS).
 	: > "$mnt/root/etc/machine-id"
-	rm -f "$mnt/root/etc/dropbear/"* "$mnt/root/var/lib/lightmoss/firstboot.done"
+	rm -f "$mnt/root/etc/dropbear/"*
 fi
 
 echo "5/5 syncing"
