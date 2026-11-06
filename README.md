@@ -142,9 +142,9 @@ machine ID; `--wipe` starts over instead. The base OS holds no spruce data
 (spruce keeps everything on its own card, Wi-Fi networks included), so
 nothing else is lost.
 
-**An eMMC that powers off after a few seconds with TF1 empty** holds a
-LightMoss from before 2026-11-06 (U-Boot then showed its "no SD card" screen and
-powered off instead of booting the eMMC). Update it as for a first install:
+**An eMMC that shows U-Boot's "no SD card" screen and powers off with TF1
+empty** holds an older LightMoss, whose U-Boot muxed the eMMC's pins away for
+SPI flash and buttons the G80CA does not have. Update it as for a first install:
 current LightMoss on the TF1 card, `LightMoss.rkimg` on the spruce card in TF2,
 an empty `lightmoss-install` on the TF1 card's BOOT, charger, power on.
 
