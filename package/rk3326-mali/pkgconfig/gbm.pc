@@ -5,7 +5,9 @@ includedir=${prefix}/include
 
 Name: gbm
 Description: Mali GBM library
-Version: 10.4.0
+# rockchip's template says 10.4.0; the blob has the GBM API SDL2's
+# KMSDRM driver needs (it checks for >= 11.1.0), so that is declared.
+Version: 11.1.0
 Libs: -L${libdir} -lgbm
 Libs.private: -lm -lpthread
 Cflags: -I${includedir}

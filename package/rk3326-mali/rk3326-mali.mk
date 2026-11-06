@@ -51,6 +51,12 @@ define RK3326_MALI_EXTRACT_CMDS
 	)
 	# GLES/egl.h is a compatibility header that only includes EGL/egl.h.
 	printf '#include <EGL/egl.h>\n' > $(@D)/include/GLES/egl.h
+	# Mesa's GBM_BO_USE_LINEAR (1 << 4), which SDL2's KMSDRM driver uses
+	# unguarded: rockchip's gbm.h predates it. dArkMoss's SDL2 is built
+	# against Mesa's header and runs on this same blob.
+	sed -i 's/^\(\s*\)GBM_BO_USE_WRITE\(\s*\)= (1 << 3),/&\n\1GBM_BO_USE_LINEAR = (1 << 4),/' \
+		$(@D)/include/gbm.h
+	grep -q 'GBM_BO_USE_LINEAR = (1 << 4)' $(@D)/include/gbm.h
 endef
 
 # A proper soname, so what links against it records libmali.so.1.
