@@ -1,0 +1,41 @@
+#!/bin/sh
+# With /boot/lightmoss-debug present, write readable logs to /boot/logs, where
+# any PC can read them off the card. Off by default: an unclean power-off while
+# /boot is being written can dirty the FAT partition U-Boot boots from.
+FLAG=/boot/lightmoss-debug
+LOGDIR=/boot/logs
+KEEP=5
+
+[ -e "$FLAG" ] || exit 0
+mountpoint -q /boot || exit 0
+
+STAMP=$(date +%Y%m%d-%H%M%S 2>/dev/null) || STAMP=unknown
+OUT="$LOGDIR/$STAMP"
+mkdir -p "$OUT" || exit 0
+
+journalctl -b -1 --no-pager > "$OUT/previous-boot.log" 2>/dev/null
+journalctl -b 0 --no-pager  > "$OUT/this-boot.log"     2>/dev/null
+dmesg                       > "$OUT/dmesg.log"         2>/dev/null
+{
+	echo "date:    $(date 2>/dev/null)"
+	echo "kernel:  $(uname -a 2>/dev/null)"
+	echo "cmdline: $(cat /proc/cmdline)"
+	echo "uptime:  $(uptime 2>/dev/null)"
+	echo
+	echo "--- os-release"; cat /etc/os-release
+	echo; echo "--- block devices"; lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINT
+	echo; echo "--- mounts"; mount
+	echo; echo "--- disk"; df -h
+	echo; echo "--- failed units"; systemctl --failed --no-pager
+	echo; echo "--- network"; ip addr; nmcli general 2>&1; nmcli device 2>&1
+	echo; echo "--- usb"; lsusb 2>&1
+	echo; echo "--- sound"; cat /proc/asound/cards; amixer controls 2>&1 | head -40
+	echo; echo "--- input"; cat /proc/bus/input/devices
+} > "$OUT/system.txt" 2>&1
+
+[ -f /mnt/SDCARD/Saves/spruce/spruce.log ] && cp -f /mnt/SDCARD/Saves/spruce/spruce.log "$OUT/" 2>/dev/null
+
+ls -1d "$LOGDIR"/*/ 2>/dev/null | sort | head -n "-$KEEP" | while read -r old; do
+	rm -rf "$old"
+done
+sync

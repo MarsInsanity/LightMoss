@@ -1,0 +1,146 @@
+# LightMoss for the R36S clone (G80CA-MB board), RK3326.
+# A minimal base OS whose only job is to boot and hand off to spruce.
+
+# --- Architecture --------------------------------------------------------------
+BR2_aarch64=y
+BR2_cortex_a35=y
+
+# --- Build options -------------------------------------------------------------
+# https: sources.buildroot.net's plain http is often filtered.
+BR2_BACKUP_SITE="https://sources.buildroot.net"
+BR2_CCACHE=y
+BR2_OPTIMIZE_2=y
+
+# --- Toolchain: glibc (PortMaster ports are glibc binaries) --------------------
+BR2_TOOLCHAIN_BUILDROOT_GLIBC=y
+# NetworkManager needs >= 5.4 headers; the running kernel is the 4.4 BSP, so
+# glibc is built to run on older kernels than its headers.
+BR2_KERNEL_HEADERS_5_10=y
+BR2_PACKAGE_GLIBC_KERNEL_COMPAT=y
+BR2_GCC_VERSION_14_X=y
+BR2_TOOLCHAIN_BUILDROOT_CXX=y
+# libgomp: a number of PortMaster ports link against it.
+BR2_GCC_ENABLE_OPENMP=y
+
+# --- System --------------------------------------------------------------------
+BR2_TARGET_GENERIC_HOSTNAME="lightmoss"
+BR2_TARGET_GENERIC_ISSUE="LightMoss"
+BR2_INIT_SYSTEMD=y
+BR2_TARGET_GENERIC_ROOT_PASSWD="happygaming"
+# Nothing logs in on a console: tty1 belongs to spruce.
+# BR2_TARGET_GENERIC_GETTY is not set
+BR2_SYSTEM_BIN_SH_BUSYBOX=y
+# spruce brings its own zoneinfo; the base only needs UTC.
+BR2_TARGET_TZ_ZONELIST="etcetera"
+BR2_TARGET_LOCALTIME="Etc/UTC"
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/r36s/rootfs-overlay"
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/r36s/post-build.sh"
+BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/r36s/post-image.sh"
+
+# --- Kernel: christianhaitian's rg351 4.4 BSP + the G80CA board -----------------
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_GIT=y
+BR2_LINUX_KERNEL_CUSTOM_REPO_URL="https://github.com/christianhaitian/linux.git"
+BR2_LINUX_KERNEL_CUSTOM_REPO_VERSION="d8402159c04b1044106b4f27b7ed7c22ed09228f"
+BR2_LINUX_KERNEL_CUSTOM_REPO_GIT_SUBMODULES=y
+BR2_LINUX_KERNEL_PATCH="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/r36s/linux/patches"
+BR2_LINUX_KERNEL_DEFCONFIG="rg351p_tweaked"
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/r36s/linux/lightmoss.config"
+BR2_LINUX_KERNEL_DTS_SUPPORT=y
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip/rk3326-r36sclone-linux rockchip/rk3326-r36sclone-panel9-linux"
+BR2_LINUX_KERNEL_NEEDS_HOST_OPENSSL=y
+
+# --- Bootloader ------------------------------------------------------------------
+BR2_PACKAGE_RK3326_UBOOT=y
+
+# --- Filesystem images -------------------------------------------------------------
+BR2_TARGET_ROOTFS_EXT2=y
+BR2_TARGET_ROOTFS_EXT2_4=y
+BR2_TARGET_ROOTFS_EXT2_LABEL="LIGHTMOSS"
+BR2_TARGET_ROOTFS_EXT2_SIZE="1024M"
+# BR2_TARGET_ROOTFS_TAR is not set
+BR2_PACKAGE_HOST_DOSFSTOOLS=y
+BR2_PACKAGE_HOST_GENIMAGE=y
+BR2_PACKAGE_HOST_MTOOLS=y
+
+# --- Hardware: firmware, GPU, audio, input ------------------------------------------
+BR2_PACKAGE_LINUX_FIRMWARE=y
+BR2_PACKAGE_LINUX_FIRMWARE_MEDIATEK_MT7601U=y
+BR2_PACKAGE_RK3326_MALI=y
+BR2_PACKAGE_ALSA_LIB=y
+BR2_PACKAGE_ALSA_UTILS=y
+BR2_PACKAGE_ALSA_UTILS_ALSACTL=y
+BR2_PACKAGE_ALSA_UTILS_AMIXER=y
+BR2_PACKAGE_ALSA_UTILS_APLAY=y
+BR2_PACKAGE_HPJACKD=y
+BR2_PACKAGE_LIBEVDEV=y
+# MT7601U dongles that first show up as a driver CD (148f:2878).
+BR2_PACKAGE_USB_MODESWITCH=y
+
+# --- systemd: only what spruce's dArkMoss platform code relies on ------------------
+# BR2_PACKAGE_SYSTEMD_HWDB is not set
+# BR2_PACKAGE_SYSTEMD_LOGIND is not set
+# BR2_PACKAGE_SYSTEMD_NETWORKD is not set
+# BR2_PACKAGE_SYSTEMD_RESOLVED is not set
+# BR2_PACKAGE_SYSTEMD_HOSTNAMED is not set
+# BR2_PACKAGE_SYSTEMD_TIMEDATED is not set
+# BR2_PACKAGE_SYSTEMD_LOCALED is not set
+# BR2_PACKAGE_SYSTEMD_MYHOSTNAME is not set
+# BR2_PACKAGE_SYSTEMD_VCONSOLE is not set
+# BR2_PACKAGE_SYSTEMD_BACKLIGHT is not set
+# BR2_PACKAGE_SYSTEMD_RFKILL is not set
+# BR2_PACKAGE_SYSTEMD_QUOTACHECK is not set
+# BR2_PACKAGE_SYSTEMD_UTMP is not set
+# BR2_PACKAGE_SYSTEMD_BINFMT is not set
+# BR2_PACKAGE_SYSTEMD_PSTORE is not set
+# BR2_PACKAGE_SYSTEMD_COREDUMP is not set
+# BR2_PACKAGE_SYSTEMD_FIRSTBOOT is not set
+# BR2_PACKAGE_SYSTEMD_HIBERNATE is not set
+BR2_PACKAGE_SYSTEMD_TIMESYNCD=y
+BR2_PACKAGE_SYSTEMD_RANDOMSEED=y
+
+# --- Networking: NetworkManager + wpa_supplicant (spruce drives Wi-Fi with nmcli) ---
+BR2_PACKAGE_NETWORK_MANAGER=y
+BR2_PACKAGE_NETWORK_MANAGER_CLI=y
+BR2_PACKAGE_WPA_SUPPLICANT=y
+BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y
+BR2_PACKAGE_WPA_SUPPLICANT_DBUS=y
+# spruce's Network Settings starts and stops the "ssh" unit (dropbear here).
+BR2_PACKAGE_DROPBEAR=y
+# BR2_PACKAGE_DROPBEAR_CLIENT is not set
+
+# --- Userland tools the base, spruce and PortMaster scripts call ------------------
+BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/r36s/busybox.fragment"
+BR2_PACKAGE_BASH=y
+BR2_PACKAGE_UTIL_LINUX=y
+BR2_PACKAGE_UTIL_LINUX_BINARIES=y
+BR2_PACKAGE_UTIL_LINUX_MOUNTPOINT=y
+BR2_PACKAGE_UTIL_LINUX_PARTX=y
+BR2_PACKAGE_E2FSPROGS=y
+BR2_PACKAGE_DOSFSTOOLS=y
+BR2_PACKAGE_DOSFSTOOLS_FSCK_FAT=y
+BR2_PACKAGE_DOSFSTOOLS_MKFS_FAT=y
+BR2_PACKAGE_EXFATPROGS=y
+
+# --- Graphics/audio runtime for spruce's PyUI, emulators and PortMaster ports -----
+BR2_PACKAGE_SDL2=y
+BR2_PACKAGE_SDL2_KMSDRM=y
+BR2_PACKAGE_SDL2_OPENGLES=y
+BR2_PACKAGE_SDL2_IMAGE=y
+BR2_PACKAGE_SDL2_MIXER=y
+# SDL2_image and SDL2_mixer pick up whichever codec libraries are enabled.
+BR2_PACKAGE_FLAC=y
+BR2_PACKAGE_LIBMODPLUG=y
+BR2_PACKAGE_SDL2_TTF=y
+BR2_PACKAGE_SDL2_NET=y
+BR2_PACKAGE_SDL2_GFX=y
+BR2_PACKAGE_OPENAL=y
+BR2_PACKAGE_LIBOGG=y
+BR2_PACKAGE_LIBVORBIS=y
+BR2_PACKAGE_LIBTHEORA=y
+BR2_PACKAGE_FREETYPE=y
+BR2_PACKAGE_LIBPNG=y
+BR2_PACKAGE_JPEG=y
+BR2_PACKAGE_ZLIB=y
+BR2_PACKAGE_XZ=y
+BR2_PACKAGE_BZIP2=y

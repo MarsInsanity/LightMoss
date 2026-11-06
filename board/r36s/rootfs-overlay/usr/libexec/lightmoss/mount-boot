@@ -1,0 +1,13 @@
+#!/bin/sh
+# Mount BOOT, partition 1 of the disk the root filesystem is on, at /boot.
+# By disk rather than by label or UUID, so a TF1 card and an eMMC install that
+# are copies of each other each mount their own.
+. /usr/libexec/lightmoss/lib.sh
+
+mountpoint -q /boot && exit 0
+disk="$(lm_root_disk)" || { echo "cannot tell which disk / is on" >&2; exit 1; }
+dev="$(lm_part "$disk" 1)"
+# A dirty FAT (power pulled while it was being written) is repaired before it
+# gets any worse: U-Boot has to read this partition.
+fsck.fat -a -w "$dev" >/dev/null 2>&1
+mount -t vfat -o rw,noatime "$dev" /boot

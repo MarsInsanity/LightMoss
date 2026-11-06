@@ -1,0 +1,14 @@
+Load BOOT's uboot.dtb whatever hwrev reads, so an image ships its own unit's U-Boot dtb
+under that one name. hwrev still runs: rockchip_display sizes the logo from it.
+
+--- a/arch/arm/mach-rockchip/board.c
++++ b/arch/arm/mach-rockchip/board.c
+@@ -365,7 +365,7 @@
+ 	}
+ ////
+ 	//SD
+-	ret = run_command("fatload mmc 1:1 ${fdt_addr_r} ${dtb_uboot}", 0);
++	ret = run_command("fatload mmc 1:1 ${fdt_addr_r} uboot.dtb", 0);
+ 	if (ret == CMD_RET_SUCCESS) {
+ 		ret = check_fdt_header(fdt_addr);
+ 	} 

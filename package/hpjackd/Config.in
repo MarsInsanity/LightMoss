@@ -1,0 +1,12 @@
+config BR2_PACKAGE_HPJACKD
+	bool "hpjackd"
+	depends on BR2_PACKAGE_ALSA_LIB
+	help
+	  Moves the rk817 codec's "Playback Path" to HP while
+	  headphones are plugged in and back to SPK when they come
+	  out, following the sound card's jack switch. Honours
+	  /boot/headphones-invert for boards that report the jack the
+	  other way round.
+
+comment "hpjackd needs alsa-lib"
+	depends on !BR2_PACKAGE_ALSA_LIB

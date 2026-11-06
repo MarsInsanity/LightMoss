@@ -1,0 +1,93 @@
+#!/bin/sh
+# Copy the running LightMoss (booted from TF1) onto the internal eMMC.
+#
+# EVERYTHING on the eMMC is erased (on most G80CA units: EmuELEC). The copy gets
+# the same layout as the card: the Rockchip loader in the raw sectors, BOOT,
+# the root filesystem, and on its first boot the SPRUCEOS partition in the rest.
+# It gets its own disk signature, so root=PARTUUID never confuses it with the
+# card. Afterwards a LightMoss card in TF1 still boots first; take it out to
+# boot from the eMMC.
+#
+#   lightmoss-install-emmc [-y]
+set -eu
+. /usr/libexec/lightmoss/lib.sh
+
+die() { echo "lightmoss-install-emmc: $*" >&2; exit 1; }
+
+root="$(lm_root_disk)" || die "cannot tell which disk / is on"
+emmc=""
+for d in /sys/block/mmcblk*; do
+	disk="${d##*/}"
+	case "$disk" in *boot*|*rpmb*) continue ;; esac
+	[ "$(lm_disk_type "$disk")" = MMC ] && emmc="$disk"
+done
+[ -n "$emmc" ] || die "no eMMC found"
+[ "$emmc" != "$root" ] || die "this system is already running from the eMMC"
+
+size_mb=$(( $(cat "/sys/block/$emmc/size") / 2048 ))
+[ "$size_mb" -ge 1536 ] || die "the eMMC is only ${size_mb} MB"
+
+boot_sectors="$(cat "/sys/block/$root/$(basename "$(lm_part "$root" 1)")/size")"
+root_sectors="$(cat "/sys/block/$root/$(basename "$(lm_part "$root" 2)")/size")"
+
+if [ "${1:-}" != "-y" ]; then
+	echo "This copies LightMoss from /dev/$root to the internal eMMC, /dev/$emmc (${size_mb} MB)."
+	echo "EVERYTHING ON THE eMMC WILL BE ERASED."
+	printf 'Type "yes" to continue: '
+	read -r answer
+	[ "$answer" = yes ] || die "cancelled"
+fi
+
+for m in $(awk -v d="/dev/$emmc" 'index($1, d) == 1 { print $2 }' /proc/mounts); do
+	umount "$m" || die "cannot unmount $m"
+done
+
+sig="$(od -An -N4 -tx4 /dev/urandom | tr -d ' \n')"
+[ "$sig" != 4c4d3336 ] || sig=4c4d4531
+echo "1/5 boot loader"
+# Everything between the MBR and BOOT: idbloader (64), uboot (16384), trust (24576).
+dd if="/dev/$root" of="/dev/$emmc" bs=512 skip=64 seek=64 count=$((32768 - 64)) conv=fsync status=none
+
+echo "2/5 partitions (disk signature 0x$sig)"
+sfdisk --quiet --wipe always "/dev/$emmc" <<SFDISK
+label: dos
+label-id: 0x$sig
+unit: sectors
+
+start=32768, size=$boot_sectors, type=c, bootable
+start=$((32768 + boot_sectors)), size=$root_sectors, type=83
+SFDISK
+blockdev --rereadpt "/dev/$emmc" 2>/dev/null || partx --update "/dev/$emmc"
+sleep 1
+e1="$(lm_part "$emmc" 1)"; e2="$(lm_part "$emmc" 2)"
+
+mnt="$(mktemp -d)"
+trap 'umount "$mnt/boot" "$mnt/root" "$mnt/src" 2>/dev/null; rm -rf "$mnt"' EXIT
+mkdir -p "$mnt/boot" "$mnt/root" "$mnt/src"
+
+echo "3/5 BOOT"
+mkfs.vfat -F 32 -n BOOT "$e1" >/dev/null
+mount "$e1" "$mnt/boot"
+for f in /boot/*; do
+	case "${f##*/}" in logs|lightmoss-debug) continue ;; esac
+	cp -a "$f" "$mnt/boot/"
+done
+sed -i "s/root=PARTUUID=[0-9a-f]*-02/root=PARTUUID=$sig-02/" "$mnt/boot/boot.ini"
+grep -q "root=PARTUUID=$sig-02" "$mnt/boot/boot.ini" || die "could not point boot.ini at the eMMC"
+
+echo "4/5 root filesystem (this takes a few minutes)"
+mkfs.ext4 -q -F -L LIGHTMOSS "$e2"
+mount "$e2" "$mnt/root"
+# A plain (non-recursive) bind mount shows the root filesystem alone, with
+# /boot, /proc, /mnt/SDCARD... as the empty directories they are underneath.
+mount --bind / "$mnt/src"
+cp -a "$mnt/src/." "$mnt/root/"
+umount "$mnt/src"
+# A fresh identity and a fresh first boot for the copy.
+: > "$mnt/root/etc/machine-id"
+rm -f "$mnt/root/etc/dropbear/"* "$mnt/root/var/lib/lightmoss/firstboot.done"
+rm -rf "$mnt/root/var/log/journal/"*
+
+echo "5/5 syncing"
+sync
+echo "Done. Power off, take the LightMoss card out of TF1 and power on to boot from the eMMC."

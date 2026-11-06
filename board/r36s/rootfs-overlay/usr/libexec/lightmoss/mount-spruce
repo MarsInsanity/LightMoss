@@ -1,0 +1,60 @@
+#!/bin/sh
+# Mount spruce at /mnt/SDCARD, where spruce expects to find itself.
+#
+# Where spruce can be, first match wins:
+#   1. partition 1 of a card in a slot this system is not on (TF2, or TF1
+#      when LightMoss runs from the eMMC);
+#   2. a FAT32/exFAT partition after BOOT on this system's own disk (the
+#      SPRUCEOS partition lightmoss-firstboot made).
+# The one that has spruce/scripts/runtime.sh is spruce. None after a retry: say
+# so on the screen and power off.
+. /usr/libexec/lightmoss/lib.sh
+
+candidates() {
+	root_disk="$(lm_root_disk)"
+	for d in /sys/block/mmcblk*; do
+		disk="${d##*/}"
+		[ "$disk" != "$root_disk" ] || continue
+		[ "$(lm_disk_type "$disk")" = SD ] || continue
+		p="$(lm_part "$disk" 1)"
+		[ -b "$p" ] && echo "$p"
+	done
+	n=2
+	while [ -b "$(lm_part "$root_disk" "$n")" ]; do
+		p="$(lm_part "$root_disk" "$n")"
+		case "$(blkid -o value -s TYPE "$p" 2>/dev/null)" in
+			vfat|exfat) echo "$p" ;;
+		esac
+		n=$((n + 1))
+	done
+}
+
+mount_spruce() {
+	mountpoint -q /mnt/SDCARD && [ -f /mnt/SDCARD/spruce/scripts/runtime.sh ] && return 0
+	for dev in $(candidates); do
+		mount -o rw,noatime,umask=0000 "$dev" /mnt/SDCARD 2>/dev/null || continue
+		if [ -f /mnt/SDCARD/spruce/scripts/runtime.sh ]; then
+			echo "spruce found on $dev"
+			return 0
+		fi
+		umount /mnt/SDCARD
+	done
+	return 1
+}
+
+mkdir -p /mnt/SDCARD
+mount_spruce && exit 0
+
+lm_say "Looking for the spruce card..."
+sleep 5
+if mount_spruce; then
+	printf '\033[2J\033[H' > /dev/tty1 2>/dev/null
+	exit 0
+fi
+
+lm_say "spruce card not found, shutting down"
+echo "spruce card not found, powering off" >&2
+sleep 3
+systemctl poweroff
+sleep 60
+exit 1

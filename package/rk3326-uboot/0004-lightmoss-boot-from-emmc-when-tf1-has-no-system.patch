@@ -1,0 +1,91 @@
+LightMoss: boot from the internal eMMC when TF1 has no system on it.
+
+TF1 (mmc 1) is still tried first, exactly as before, so a card in TF1
+always wins. When it has no boot.ini / uboot.dtb, U-Boot reads them from
+the G80CA's internal eMMC (mmc 0) instead, and cfgload sets ${bootdev} to
+the device boot.ini came from so the kernel is loaded from there too.
+The eMMC is enabled in U-Boot's built-in device tree for that.
+
+diff --git a/arch/arm/dts/odroidgoa.dts b/arch/arm/dts/odroidgoa.dts
+index 30b6e69..c260446 100644
+--- a/arch/arm/dts/odroidgoa.dts
++++ b/arch/arm/dts/odroidgoa.dts
+@@ -355,8 +355,17 @@
+ 	status = "okay";
+ };
+ 
++/* LightMoss: the G80CA's internal eMMC, so uboot.dtb and boot.ini can come from it */
+ &emmc {
+-	status = "disabled";
++	bus-width = <8>;
++	cap-mmc-highspeed;
++	supports-emmc;
++	disable-wp;
++	non-removable;
++	num-slots = <1>;
++	pinctrl-names = "default";
++	pinctrl-0 = <&emmc_clk &emmc_cmd &emmc_bus8>;
++	status = "okay";
+ };
+ 
+ &pwm1 {
+diff --git a/arch/arm/mach-rockchip/board.c b/arch/arm/mach-rockchip/board.c
+index ae9a0c2..a4211ae 100755
+--- a/arch/arm/mach-rockchip/board.c
++++ b/arch/arm/mach-rockchip/board.c
+@@ -369,6 +369,12 @@ int init_kernel_dtb(void)
+ 	if (ret == CMD_RET_SUCCESS) {
+ 		ret = check_fdt_header(fdt_addr);
+ 	} 
++	/* LightMoss: no uboot.dtb on TF1 (mmc 1), so the system is on the eMMC (mmc 0) */
++	if (ret != CMD_RET_SUCCESS) {
++		ret = run_command("fatload mmc 0:1 ${fdt_addr_r} uboot.dtb", 0);
++		if (ret == CMD_RET_SUCCESS)
++			ret = check_fdt_header(fdt_addr);
++	}
+ 	
+ 	//SPI
+ 	if (ret != CMD_RET_SUCCESS) {
+diff --git a/cmd/cfgload.c b/cmd/cfgload.c
+index de05ef2..3cc3e4e 100644
+--- a/cmd/cfgload.c
++++ b/cmd/cfgload.c
+@@ -24,6 +24,9 @@ static int do_load_cfgload(cmd_tbl_t *cmdtp, int flag, int argc,
+ 		"boot.scr",
+ 	};
+ 	int i;
++	/* LightMoss: TF1 (mmc 1) first, then the internal eMMC (mmc 0) */
++	const char *devs[] = { "1", "0" };
++	int d;
+ 
+ 	if (argc < 2) {
+ 		addr = CONFIG_SYS_LOAD_ADDR;
+@@ -33,13 +36,21 @@ static int do_load_cfgload(cmd_tbl_t *cmdtp, int flag, int argc,
+ 		debug("cfgload: cmdline image address = 0x%08lx\n", addr);
+ 	}
+ 
+-	for (i = 0; i < ARRAY_SIZE(scripts); i++) {
+-		if (file_exists("mmc", "1", scripts[i], FS_TYPE_ANY)) {
+-			snprintf(cmd, sizeof(cmd),
+-				"load mmc 1:1 0x%08lx %s; source 0x%08lx",
+-				addr, scripts[i], addr);
+-			if (run_command(cmd, 0) == 0)
+-				return 0;
++	/*
++	 * LightMoss: TF1 (mmc 1) first, as before, so a card in TF1 always wins;
++	 * then the internal eMMC (mmc 0). ${bootdev} tells boot.ini which one it
++	 * was read from, so it loads the kernel from the same place.
++	 */
++	for (d = 0; d < ARRAY_SIZE(devs); d++) {
++		for (i = 0; i < ARRAY_SIZE(scripts); i++) {
++			if (file_exists("mmc", devs[d], scripts[i], FS_TYPE_ANY)) {
++				env_set("bootdev", devs[d]);
++				snprintf(cmd, sizeof(cmd),
++					"load mmc %s:1 0x%08lx %s; source 0x%08lx",
++					devs[d], addr, scripts[i], addr);
++				if (run_command(cmd, 0) == 0)
++					return 0;
++			}
+ 		}
+ 	}
+ 

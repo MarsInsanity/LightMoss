@@ -1,0 +1,13 @@
+config BR2_PACKAGE_RK3326_UBOOT
+	bool "rk3326-uboot (R36S clone, G80CA)"
+	depends on BR2_aarch64
+	depends on BR2_HOSTARCH = "x86_64" # Linaro GCC 6.3 binaries
+	help
+	  Rockchip's legacy U-Boot (2017.09) as christianhaitian's
+	  RG351MP-u-boot builds it for the RK3326 handhelds, with the
+	  R36S clone's G80CA board and both of its panels (from
+	  BobMoss), the panel-ID check, and LightMoss's fallback to the
+	  internal eMMC when TF1 holds no system.
+
+	  Produces idbloader.img, uboot.img and trust.img for the raw
+	  boot sectors, and uboot.dtb / uboot-panel9.dtb for BOOT.

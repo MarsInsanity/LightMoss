@@ -1,0 +1,11 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: glesv1_cm
+Description: Mali GLES 1 library
+Version: 7.10
+Libs: -L${libdir} -lGLESv1_CM
+Libs.private: -lm -lpthread
+Cflags: -I${includedir}

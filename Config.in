@@ -1,0 +1,5 @@
+menu "LightMoss"
+	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/rk3326-mali/Config.in"
+	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/rk3326-uboot/Config.in"
+	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/hpjackd/Config.in"
+endmenu

@@ -1,0 +1,20 @@
+# LightMoss: what starts at boot. Anything not listed falls through to
+# systemd's own presets (and from there to "enable").
+enable lightmoss-boot.service
+enable lightmoss-firstboot.service
+enable lightmoss-debug.service
+enable spruce-launch.service
+enable hpjackd.service
+enable NetworkManager.service
+enable systemd-timesyncd.service
+
+# spruce's Network Settings switches SSH on and off.
+disable ssh.service
+disable dropbear.service
+# NetworkManager starts it over D-Bus when there is a Wi-Fi device.
+disable wpa_supplicant.service
+disable NetworkManager-wait-online.service
+# tty1 belongs to spruce: nothing logs in on a console.
+disable getty@.service
+disable serial-getty@.service
+disable console-getty.service

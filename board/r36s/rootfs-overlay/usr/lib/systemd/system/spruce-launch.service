@@ -1,0 +1,36 @@
+[Unit]
+Description=Hand off to spruce
+# The frontend starts last, once the base system is up. mount-spruce waits for
+# the card itself; there is no mount unit for it.
+After=multi-user.target lightmoss-firstboot.service
+
+[Service]
+Type=idle
+# spruce runs as root and does its own mounts and hardware access. Its scripts
+# use $HOME (ALSA's ~/.asoundrc, among others).
+Environment=HOME=/root
+
+# Kill only runtime.sh on stop, not the whole cgroup: spruce powers off from
+# save_poweroff.sh, a descendant of runtime.sh that kills runtime.sh on its way
+# past. With the default KillMode=control-group systemd would then kill
+# save_poweroff.sh too, before it reaches the poweroff.
+KillMode=process
+ExecStartPre=/usr/libexec/lightmoss/mount-spruce
+# Cosmetic, so a failure must not stop the frontend (the leading dash).
+ExecStartPre=-/usr/libexec/lightmoss/console-blank
+# runtime.sh is spruce's own entry point. SIGHUP is ignored before the exec and
+# stays ignored in everything spruce starts: TTYVHangup below hangs up tty1
+# when this unit stops, which would otherwise kill a running game before it
+# saves. With /boot/lightmoss-debug, spruce narrates on the screen.
+ExecStart=/bin/sh -c 'trap "" HUP; if [ -e /boot/lightmoss-debug ]; then exec /mnt/SDCARD/spruce/scripts/runtime.sh >/dev/tty1 2>&1; else exec /mnt/SDCARD/spruce/scripts/runtime.sh; fi'
+Restart=on-failure
+RestartSec=3
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+
+[Install]
+WantedBy=multi-user.target

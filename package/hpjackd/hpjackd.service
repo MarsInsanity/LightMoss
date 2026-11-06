@@ -1,0 +1,11 @@
+[Unit]
+Description=Route audio to the headphones while they are plugged in
+After=sound.target alsa-restore.service
+
+[Service]
+ExecStart=/usr/sbin/hpjackd
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
