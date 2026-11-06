@@ -1,5 +1,16 @@
 menu "LightMoss"
+
+config BR2_LIGHTMOSS_LIB32
+	bool "LightMoss 32-bit (armhf) runtime build"
+	depends on BR2_ARM_EABIHF && BR2_TOOLCHAIN_USES_GLIBC
+	help
+	  Set only in configs/lightmoss_r36s_lib32_defconfig: this build
+	  is not an image but the armhf libraries the 64-bit image carries
+	  in /usr/lib/arm-linux-gnueabihf (package lightmoss-lib32). Its
+	  glibc's loader searches that directory.
+
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/rk3326-mali/Config.in"
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/rk3326-uboot/Config.in"
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/hpjackd/Config.in"
+	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/lightmoss-lib32/Config.in"
 endmenu

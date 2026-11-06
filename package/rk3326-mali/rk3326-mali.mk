@@ -5,9 +5,15 @@
 ################################################################################
 
 # The blob, from christianhaitian/rk3326_core_builds (what dArkOS/dArkMoss
-# install on the rg351 kernel; its kbase is r12p0).
-RK3326_MALI_VERSION = 2e1b272a8837b55ae4c17be48abe019dbb37ca7a
-RK3326_MALI_SITE = https://raw.githubusercontent.com/christianhaitian/rk3326_core_builds/$(RK3326_MALI_VERSION)/mali/aarch64
+# install on the rg351 kernel; its kbase is r12p0). One package for both the
+# 64-bit image and the 32-bit (lib32) runtime: the two blobs share a file
+# name, so each architecture has its own version, download directory and
+# hash file (<version>/rk3326-mali.hash).
+RK3326_MALI_COMMIT = 2e1b272a8837b55ae4c17be48abe019dbb37ca7a
+RK3326_MALI_ARCH = $(if $(BR2_arm),armhf,aarch64)
+RK3326_MALI_VERSION = g31-rxp0-$(RK3326_MALI_ARCH)
+RK3326_MALI_DL_SUBDIR = rk3326-mali-$(RK3326_MALI_ARCH)
+RK3326_MALI_SITE = https://raw.githubusercontent.com/christianhaitian/rk3326_core_builds/$(RK3326_MALI_COMMIT)/mali/$(RK3326_MALI_ARCH)
 RK3326_MALI_SOURCE = libmali-bifrost-g31-rxp0-gbm.so
 RK3326_MALI_LICENSE = Proprietary
 RK3326_MALI_LICENSE_FILES = END_USER_LICENCE_AGREEMENT.txt

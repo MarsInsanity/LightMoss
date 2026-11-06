@@ -22,11 +22,11 @@ nothing else.
 | Hardware | Joypad and both sticks, volume keys, power key, rk817 audio with automatic headphone switching (`hpjackd`), rk817 battery/charger, backlight, both TF slots, eMMC, suspend, USB host on the OTG port (dongle, USB pad, USB DAC). |
 | Userland | glibc 2.42, systemd 257, NetworkManager + wpa_supplicant, dropbear (as the `ssh` unit), busybox, bash, ALSA utils, util-linux, e2fsprogs/dosfstools/exfatprogs. |
 | PortMaster runtime | SDL2 (KMSDRM + GLES), SDL2_image, SDL2_mixer, SDL2_ttf, SDL2_net, SDL2_gfx, OpenAL, libevdev, libgomp, libstdc++, zlib/png/jpeg/freetype/ogg/vorbis/theora/flac/modplug, squashfs + loop + overlayfs for PortMaster's runtimes, and Debian's `/usr/lib/aarch64-linux-gnu` path. |
+| 32-bit runtime | The same libraries built for armhf (plus libudev and the armhf Mali blob) in `/usr/lib/arm-linux-gnueabihf`, with the loader at `/lib/ld-linux-armhf.so.3`, Debian's paths: for 32-bit-only PortMaster ports and spruce's `ra32` cores. 32-bit `time_t`, the armhf ABI those binaries are built for (and the one whose ALSA calls the 4.4 kernel understands). |
 
 Left out on purpose: Python (spruce brings its own), Bluetooth (the R36S has no
-radio), logind, networkd/resolved, polkit, the udev hwdb, locales, every
-filesystem and network protocol nothing here uses, and the 32-bit (armhf)
-userland (see *Not yet* below).
+radio), logind, networkd/resolved, polkit, the udev hwdb, locales, and every
+filesystem and network protocol nothing here uses.
 
 ## How spruce sees it
 
@@ -66,11 +66,14 @@ cd LightMoss
 make
 ```
 
-The `Makefile` fetches buildroot 2025.11.3 into `buildroot/` and builds into
-`output/`. The image is `output/images/lightmoss-r36s-<version>.img.xz`. A first
-build takes a couple of hours (it builds its own GCC 14 toolchain); later ones
-reuse it. Any other target goes to buildroot: `make menuconfig`,
-`make linux-menuconfig`, `make savedefconfig`, `make linux-rebuild`, ...
+The `Makefile` fetches buildroot 2025.11.3 into `buildroot/`, builds the 32-bit
+runtime into `output-lib32/` and then the image into `output/`. The image is
+`output/images/lightmoss-r36s-<version>.img.xz`. A first build takes a few
+hours (it builds a GCC 14 toolchain for each); later ones reuse them. Any other
+target goes to the image's buildroot (`make menuconfig`, `make linux-menuconfig`,
+`make savedefconfig`, `make linux-rebuild`, ...), and `lib32-<target>` to the
+32-bit one (`make lib32-menuconfig`, ...). After changing the 32-bit build,
+`make lightmoss-lib32-reinstall all` puts it in the image.
 
 ### Why buildroot 2025.11 and not 2026.02
 
@@ -124,7 +127,8 @@ on hardware yet; test from TF1 first.
 ## Layout of this repository
 
 ```
-configs/lightmoss_r36s_defconfig     the buildroot configuration
+configs/lightmoss_r36s_defconfig     the buildroot configuration of the image
+configs/lightmoss_r36s_lib32_defconfig  ... and of the 32-bit runtime in it
 board/r36s/linux/                    kernel patches and config fragment
 board/r36s/uboot/                    U-Boot board device trees (G80CA, two panels)
 board/r36s/boot/                     files for the BOOT partition
@@ -134,16 +138,10 @@ board/r36s/genimage.cfg              disk layout
 board/r36s/post-build.sh             os-release, spruce login, compat links
 package/rk3326-uboot/                legacy Rockchip U-Boot (+ patches)
 package/linaro-gcc6-aarch64/         the GCC 6.3 toolchain that U-Boot needs
-package/rk3326-mali/                 Mali-G31 user-space blob
+package/rk3326-mali/                 Mali-G31 user-space blob (64- and 32-bit)
+package/lightmoss-lib32/             puts the 32-bit runtime in the image
 package/hpjackd/                     headphone jack -> rk817 Playback Path
 ```
-
-## Not yet
-
-- **32-bit (armhf) userland.** PortMaster ports and spruce cores that only
-  exist as armhf binaries need an armhf glibc, SDL2 and Mali blob next to the
-  64-bit ones. That is a second, small buildroot configuration merged into the
-  image; it is not in this first version.
 
 ## Credits
 

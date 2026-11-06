@@ -1,6 +1,6 @@
 config BR2_PACKAGE_RK3326_MALI
 	bool "rk3326-mali"
-	depends on BR2_aarch64
+	depends on BR2_aarch64 || BR2_ARM_EABIHF
 	depends on BR2_INSTALL_LIBSTDCPP
 	depends on BR2_TOOLCHAIN_USES_GLIBC
 	depends on BR2_TOOLCHAIN_HAS_THREADS
@@ -11,7 +11,7 @@ config BR2_PACKAGE_RK3326_MALI
 	select BR2_PACKAGE_LIBDRM
 	help
 	  The Mali-G31 (Bifrost) user-space blob for the RK3326 on the
-	  rg351 4.4 kernel: libmali-bifrost-g31-rxp0-gbm.so from
+	  rg351 4.4 kernel, 64-bit or 32-bit (armhf): libmali-bifrost-g31-rxp0-gbm.so from
 	  christianhaitian/rk3326_core_builds, the build that matches
 	  that kernel's r12p0 kbase driver (rockchip's newer libmali
 	  does not). Provides EGL, GLES 1/2/3 and GBM; the headers are
@@ -33,7 +33,7 @@ config BR2_PACKAGE_PROVIDES_LIBGBM
 
 endif
 
-comment "rk3326-mali needs an aarch64 glibc toolchain w/ C++, threads"
-	depends on BR2_aarch64
+comment "rk3326-mali needs an aarch64 or armhf glibc toolchain w/ C++, threads"
+	depends on BR2_aarch64 || BR2_ARM_EABIHF
 	depends on !BR2_INSTALL_LIBSTDCPP || !BR2_TOOLCHAIN_USES_GLIBC || \
 		!BR2_TOOLCHAIN_HAS_THREADS

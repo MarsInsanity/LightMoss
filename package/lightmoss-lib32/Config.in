@@ -1,0 +1,14 @@
+config BR2_PACKAGE_LIGHTMOSS_LIB32
+	bool "lightmoss-lib32"
+	depends on BR2_aarch64
+	help
+	  The 32-bit (armhf) runtime: glibc, libstdc++, SDL2 and its
+	  companions, OpenAL, ALSA, the armhf Mali blob and the codec
+	  libraries, built by configs/lightmoss_r36s_lib32_defconfig and
+	  installed in /usr/lib/arm-linux-gnueabihf with the loader at
+	  /lib/ld-linux-armhf.so.3 (Debian's paths). For PortMaster
+	  ports and spruce cores that only exist as armhf binaries.
+
+	  The lib32 build must be done first, into LIGHTMOSS_LIB32_DIR
+	  (default: this build's output directory with "-lib32"
+	  appended); the top-level Makefile does that.
