@@ -111,17 +111,28 @@ with its own disk signature, and leaves the rest of the eMMC for the first
 boot's `SPRUCEOS` partition. A LightMoss card in TF1 still boots first, so you
 can always boot from a card to repair the eMMC.
 
-**Updating the eMMC, Miyoo style:** rename the release's
-`lightmoss-r36s-<version>.img.xz` to `LightMoss.rkimg`, copy it to a FAT32 card
-(or to the BOOT partition of a LightMoss card), put that card in TF1, connect
-the charger and power on. U-Boot sees the file and starts the updater (a small
-initramfs, used for nothing else), which checks the image and writes it to the
+**Installing or updating the eMMC, Miyoo style (no SSH):** rename the
+release's `lightmoss-r36s-<version>.img.xz` to `LightMoss.rkimg`.
+
+- *First install* (EmuELEC still on the eMMC, so its boot loader does not know
+  about any of this): flash LightMoss to the TF1 card as usual, copy
+  `LightMoss.rkimg` to the spruce card (TF2), create an empty file named
+  `lightmoss-install` on the TF1 card's BOOT partition, connect the charger and
+  power on.
+- *Updates* (LightMoss on the eMMC): copy `LightMoss.rkimg` to a FAT32 card in
+  TF1 (a spare card, or the spruce card if it is FAT32 and in TF1), connect the
+  charger and power on. With the spruce card in TF2, put `LightMoss.rkimg` on it
+  and an empty `lightmoss-install` on any FAT32 card in TF1.
+
+U-Boot sees the file and starts the updater (a small initramfs, used for nothing
+else), which finds `LightMoss.rkimg` on any card, checks it and writes it to the
 eMMC: on an eMMC that holds LightMoss it keeps the partition table,
 `SPRUCEOS`, the disk signature, the SSH host keys, the machine ID, the panel
 choice and `headphones-invert`; anything else on the eMMC (EmuELEC) gets a
 fresh install, so this also does the first install without SSH. The file is
-then renamed `LightMoss.rkimg.done` and the device restarts into the new
-system. Without the charger it says so and boots as usual.
+then renamed `LightMoss.rkimg.done`, `lightmoss-install` is removed, and the
+device restarts. Take the TF1 card out (or put the spruce card there) to boot
+the eMMC. Without the charger it says so and boots as usual.
 
 **Updating the eMMC from a LightMoss card:** flash the new image to a TF1 card,
 boot it, and run `lightmoss-install-emmc` again. On an eMMC that already holds LightMoss it
