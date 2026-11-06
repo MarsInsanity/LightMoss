@@ -1,5 +1,6 @@
 /buildroot/
 /output/
+/output-lib32/
 /dl/
 /ccache/
 /build.log

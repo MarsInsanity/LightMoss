@@ -55,7 +55,11 @@ jobs:
       - name: Cache downloads
         uses: actions/cache@v4
         with:
-          path: dl
+          # The tarballs only: buildroot's git caches (the kernel's alone is
+          # ~7 GB of history) are rebuilt from scratch when needed.
+          path: |
+            dl
+            !dl/*/git
           key: dl-${{ hashFiles('configs/*_defconfig', 'Makefile', 'package/**/*.mk') }}
           restore-keys: dl-
 
