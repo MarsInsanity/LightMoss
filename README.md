@@ -111,6 +111,14 @@ with its own disk signature, and leaves the rest of the eMMC for the first
 boot's `SPRUCEOS` partition. A LightMoss card in TF1 still boots first, so you
 can always boot from a card to repair the eMMC.
 
+**Updating the eMMC:** flash the new image to a TF1 card, boot it, and run
+`lightmoss-install-emmc` again. On an eMMC that already holds LightMoss it
+replaces only the boot loader, BOOT and the system partition, and keeps the
+partition table, `SPRUCEOS` (and spruce on it), the SSH host keys and the
+machine ID; `--wipe` starts over instead. The base OS holds no spruce data
+(spruce keeps everything on its own card, Wi-Fi networks included), so
+nothing else is lost.
+
 The eMMC path (U-Boot's eMMC fallback and the installer) has not been tested
 on hardware yet; test from TF1 first.
 
