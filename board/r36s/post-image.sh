@@ -9,6 +9,10 @@ VERSION="$(cat "${BINARIES_DIR}/lightmoss-version" 2>/dev/null || date +%Y%m%d)"
 rm -rf "${BINARIES_DIR:?}/boot"
 mkdir -p "${BINARIES_DIR}/boot"
 cp "${BOARD_DIR}"/boot/* "${BINARIES_DIR}/boot/"
+# The charging screen's images (U-Boot's charge mode, see the script).
+PYTHON="${HOST_DIR}/bin/python3"
+[ -x "$PYTHON" ] || PYTHON=python3
+"$PYTHON" "${BOARD_DIR}/make-charge-images.py" "${BINARIES_DIR}/boot"
 
 support/scripts/genimage.sh -c "${BOARD_DIR}/genimage.cfg"
 

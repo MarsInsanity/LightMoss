@@ -1,0 +1,34 @@
+LightMoss: charging screen images from the eMMC too.
+
+The charging screen loads battery_*.bmp from BOOT on TF1 only. Look on
+the internal eMMC's BOOT next, as cfgload does for boot.ini, so an eMMC
+install shows its own images rather than falling back to SPI flash the
+G80CA does not have (which leaves only the voltage/current text).
+
+diff --git a/drivers/power/charge_animation.c b/drivers/power/charge_animation.c
+--- a/drivers/power/charge_animation.c	2026-11-06 19:58:47.418773787 +0000
++++ b/drivers/power/charge_animation.c	2026-11-06 19:58:47.435406908 +0000
+@@ -329,9 +329,21 @@
+ 	bmp_mem = lcd_get_mem();
+ 	bmp_copy = bmp_mem + LCD_LOGO_SIZE;
+ 
+-	if (!bmp_dev) {
+-		sprintf(cmd, "fatload mmc 1:1 %p %s", (void *)bmp_mem, image[idx].name);
++	/*
++	 * LightMoss: BOOT on TF1 (mmc 1) first, then BOOT on the internal eMMC
++	 * (mmc 0), the same order as cfgload; SPI flash after that. bmp_dev: 0 =
++	 * TF1 (falls through to the eMMC), 1 = the eMMC, 0xff = SPI flash.
++	 */
++	if (bmp_dev == 0 || bmp_dev == 1) {
++		sprintf(cmd, "fatload mmc %d:1 %p %s", bmp_dev ? 0 : 1,
++			(void *)bmp_mem, image[idx].name);
+ 		ret = run_command(cmd, 0);
++		if (ret != CMD_RET_SUCCESS && bmp_dev == 0) {
++			bmp_dev = 1;
++			sprintf(cmd, "fatload mmc 0:1 %p %s",
++				(void *)bmp_mem, image[idx].name);
++			ret = run_command(cmd, 0);
++		}
+ 		if (ret != CMD_RET_SUCCESS)
+ 			bmp_dev = 0xff;
+ 	}
