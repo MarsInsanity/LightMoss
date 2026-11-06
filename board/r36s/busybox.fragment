@@ -2,6 +2,9 @@
 # that buildroot's default busybox leaves out.
 CONFIG_STAT=y
 CONFIG_FEATURE_STAT_FORMAT=y
+# awk with math (^, sqrt, ...): spruce's dArkMoss code finds the volume keys
+# with 2^bit in awk; without it no node qualifies and the keys are ignored.
+CONFIG_FEATURE_AWK_LIBM=y
 CONFIG_FEATURE_STAT_FILESYSTEM=y
 CONFIG_TIMEOUT=y
 CONFIG_TAC=y
