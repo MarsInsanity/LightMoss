@@ -60,6 +60,17 @@ LightMoss.rkimg.done, lightmoss-install is removed, and the device restarts.
 If the eMMC shows a "no SD card" screen and powers off when TF1 is empty, it
 holds an older LightMoss: update it the same way as a first install (this
 card in TF1, LightMoss.rkimg on the spruce card, lightmoss-install here).
+
+If the eMMC does not start
+--------------------------
+1. Create an empty "lightmoss-debug" here as well as "lightmoss-install", and
+   install as above. The eMMC then also starts with lightmoss-debug: its
+   kernel prints on the screen (a photo of where it stops helps).
+2. Take this card out, try starting from the eMMC, power off.
+3. Put this card back in TF1 and start. Its logs (logs/<newest> here) then
+   include emmc.txt: the eMMC's boot loader against this card's, its
+   partitions, how far U-Boot got with it, and its own last boot's journal
+   (emmc-last-boot.log). lightmoss-update.log here says what the update did.
 Take the LightMoss card out of TF1 to boot from the eMMC. Without the charger
 connected nothing is written.
 

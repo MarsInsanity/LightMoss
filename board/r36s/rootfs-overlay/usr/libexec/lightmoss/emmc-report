@@ -1,0 +1,86 @@
+#!/bin/sh
+# emmc-report OUTDIR: for the debug logs of a boot from a card, what is on the
+# internal eMMC and how far its own boots got, for when it does not start.
+# Writes OUTDIR/emmc.txt, OUTDIR/emmc-last-boot.log (its newest journal boot)
+# and OUTDIR/emmc-logs (its newest exported logs, when it has any). Reads only:
+# the eMMC's partitions are mounted read-only.
+. /usr/libexec/lightmoss/lib.sh
+
+OUT="$1"
+B=/run/lightmoss-emmc/boot
+R=/run/lightmoss-emmc/root
+
+root="$(lm_root_disk)" || exit 0
+emmc=""
+for d in /sys/block/mmcblk*; do
+	n="${d##*/}"
+	case "$n" in *boot*|*rpmb*) continue ;; esac
+	[ "$(lm_disk_type "$n")" = MMC ] && emmc="$n"
+done
+[ -n "$emmc" ] || exit 0
+# Started from the eMMC: the other logs are its own.
+[ "$emmc" = "$root" ] && exit 0
+dev="/dev/$emmc"
+
+sum() { dd if="$1" bs=512 skip="$2" count="$3" 2>/dev/null | md5sum | cut -c1-32; }
+
+{
+	echo "eMMC $dev, $(($(cat "/sys/block/$emmc/size") / 2048)) MB; started from /dev/$root"
+	echo "disk signature: $(od -An -tx4 -j 440 -N 4 "$dev" | tr -d ' \n')"
+	echo; echo "--- partitions"
+	sfdisk -l "$dev" 2>&1
+	blkid "$dev"p* 2>&1
+
+	echo; echo "--- boot loader on the eMMC, against this card's"
+	for spec in idbloader:64:1984 uboot:16384:8192 trust:24576:8192; do
+		name="${spec%%:*}"; r="${spec#*:}"; off="${r%%:*}"; cnt="${r#*:}"
+		a="$(sum "$dev" "$off" "$cnt")"; b="$(sum "/dev/$root" "$off" "$cnt")"
+		if [ "$a" = "$b" ]; then echo "$name: same"; else echo "$name: DIFFERENT (eMMC $a, card $b)"; fi
+	done
+
+	echo; echo "--- U-Boot's note from its last start of the eMMC's boot.ini"
+	note="$(dd if="$dev" bs=512 skip=12288 count=4 2>/dev/null | tr -d '\000')"
+	echo "${note:-(none: U-Boot has not run the eMMC's boot.ini since the last update)}"
+
+	echo; echo "--- eMMC BOOT"
+	mkdir -p "$B" "$R"
+	if mount -t vfat -o ro "$(lm_part "$emmc" 1)" "$B"; then
+		ls -la "$B"
+		echo
+		grep -o 'root=PARTUUID=[0-9a-f-]*' "$B/boot.ini"
+		# boot.ini differs in root= alone, by design.
+		noroot() { sed 's/root=PARTUUID=[0-9a-f]*-02//' "$1"; }
+		noroot /boot/boot.ini > /run/lightmoss-emmc/card-boot.ini
+		if noroot "$B/boot.ini" | cmp -s - /run/lightmoss-emmc/card-boot.ini; then
+			echo "boot.ini: same as this card's (but for root=)"
+		else
+			echo "boot.ini: DIFFERENT from this card's"
+		fi
+		for f in Image uboot.dtb rk3326-r36sclone-linux.dtb uInitrd; do
+			if cmp -s "$B/$f" "/boot/$f"; then echo "$f: same"; else echo "$f: DIFFERENT"; fi
+		done
+		[ -f "$B/lightmoss-update.log" ] && { echo; echo "--- its lightmoss-update.log"; cat "$B/lightmoss-update.log"; }
+		latest="$(ls -1d "$B"/logs/*/ 2>/dev/null | sort | tail -n 1)"
+		if [ -n "$latest" ]; then
+			echo; echo "eMMC's own newest logs: $latest (copied to emmc-logs)"
+			rm -rf "${OUT:?}/emmc-logs"
+			cp -r "$latest" "$OUT/emmc-logs"
+		fi
+		umount "$B"
+	else
+		echo "cannot mount $(lm_part "$emmc" 1)"
+	fi
+
+	echo; echo "--- eMMC system"
+	if mount -t ext4 -o ro,noload "$(lm_part "$emmc" 2)" "$R"; then
+		grep LIGHTMOSS_VERSION "$R/etc/os-release"
+		ls -la "$R/var/lib/lightmoss" 2>&1
+		echo; echo "journal (one line per boot of the eMMC's system):"
+		journalctl -D "$R/var/log/journal" --list-boots --no-pager 2>&1 | tail -n 10
+		journalctl -D "$R/var/log/journal" -b 0 -o short-monotonic --no-pager \
+			> "$OUT/emmc-last-boot.log" 2>&1
+		umount "$R"
+	else
+		echo "cannot mount $(lm_part "$emmc" 2)"
+	fi
+} > "$OUT/emmc.txt" 2>&1
