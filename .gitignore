@@ -1,3 +1,5 @@
 /buildroot/
 /output/
 /dl/
+/ccache/
+/build.log

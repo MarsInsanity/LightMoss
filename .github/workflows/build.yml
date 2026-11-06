@@ -1,0 +1,105 @@
+name: build
+
+# Builds the LightMoss image for the R36S clone (G80CA).
+#   - every push: the image is attached to the run as an artifact
+#   - a tag (v1.2.3): the image is also published as a GitHub release
+#   - "Run workflow" on the Actions page builds any branch by hand
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+    paths-ignore: ['**.md', 'LICENSE']
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      # Keep buildroot's downloads and ccache where actions/cache can find them.
+      BR2_DL_DIR: ${{ github.workspace }}/dl
+      BR_CACHE_DIR: ${{ github.workspace }}/ccache
+    steps:
+      - name: Free disk space
+        run: |
+          # A buildroot build needs ~20 GB; the runner's preinstalled SDKs take most of it.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache \
+                      /usr/local/share/boost /usr/share/swift /usr/local/julia* /opt/az
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          df -h /
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Host packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential rsync cpio bc unzip wget file \
+                                      python3 git xz-utils
+
+      - name: Version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then v="${GITHUB_REF_NAME}"; else v="$(git describe --tags --always)-$(date -u +%Y%m%d)"; fi
+          echo "LIGHTMOSS_VERSION=$v" >> "$GITHUB_ENV"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Cache downloads
+        uses: actions/cache@v4
+        with:
+          path: dl
+          key: dl-${{ hashFiles('configs/*_defconfig', 'Makefile', 'package/**/*.mk') }}
+          restore-keys: dl-
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ccache
+          key: ccache-${{ github.run_id }}
+          restore-keys: ccache-
+
+      - name: Configure
+        run: make config
+
+      - name: Build
+        run: |
+          # Print the package being built once a minute; the full log is
+          # shown below if the build fails.
+          set +e
+          make > build.log 2>&1 &
+          pid=$!
+          while kill -0 "$pid" 2>/dev/null; do
+            sleep 60
+            grep -a '^>>> ' build.log | tail -n 1
+          done
+          wait "$pid"
+
+      - name: Build log
+        if: failure()
+        run: tail -n 300 build.log
+
+      - name: Upload image
+        uses: actions/upload-artifact@v4
+        with:
+          name: lightmoss-r36s-${{ steps.version.outputs.version }}
+          path: |
+            output/images/lightmoss-r36s-*.img.xz
+            output/images/lightmoss-r36s-*.img.xz.sha256
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "LightMoss $GITHUB_REF_NAME" --generate-notes \
+            output/images/lightmoss-r36s-*.img.xz output/images/lightmoss-r36s-*.img.xz.sha256
