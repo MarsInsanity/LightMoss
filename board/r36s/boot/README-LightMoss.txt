@@ -17,6 +17,15 @@ and each boot writes a folder under "logs" here with the previous and the
 current boot's journal, dmesg and a system summary (the five newest are kept).
 Delete the file to go back to a quiet boot.
 
+Blue LED test
+-------------
+The blue LED should be off, lit only while spruce "vibrates" (the Game
+Switcher, for example). If it stays on, create an empty file named
+"lightmoss-ledtest" in this folder and boot: before spruce starts, the screen
+counts through 7 numbered steps, each trying the LED's pins another way. Note
+the step numbers at which the LED is off. The file deletes itself (the test
+runs once) and the details go to lightmoss-ledtest.txt here.
+
 SSH
 ---
 spruce's Network Settings turns SSH on and off. Log in as "spruce" (or
