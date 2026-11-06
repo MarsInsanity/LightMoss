@@ -148,8 +148,8 @@ SPI flash and buttons the G80CA does not have. Update it as for a first install:
 current LightMoss on the TF1 card, `LightMoss.rkimg` on the spruce card in TF2,
 an empty `lightmoss-install` on the TF1 card's BOOT, charger, power on.
 
-The eMMC boot itself (U-Boot's fallback with TF1 empty) has not been
-confirmed on hardware yet.
+Booting from the eMMC with TF1 empty works on a G80CA (LightMoss 907b979, installed
+with `LightMoss.rkimg` over EmuELEC).
 
 ## The BOOT partition
 
