@@ -30,5 +30,15 @@ It copies this system to the eMMC (everything on the eMMC is erased) and
 gives it its own disk ID. Afterwards, with no LightMoss card in TF1, the
 device boots from the eMMC; a LightMoss card in TF1 still takes precedence.
 
-To update the eMMC later, boot a card with the newer LightMoss in TF1 and run
+Installing or updating the eMMC without SSH
+-------------------------------------------
+Rename a LightMoss release image (lightmoss-r36s-<version>.img.xz) to
+    LightMoss.rkimg
+copy it to a FAT32 card (or to this BOOT partition), put the card in TF1,
+connect the charger and switch on. The image is checked and written to the
+internal eMMC (an existing LightMoss keeps SPRUCEOS and its settings), the
+file is renamed LightMoss.rkimg.done, and the device restarts. Without the
+charger connected nothing is written.
+
+From SSH instead: boot a card with the newer LightMoss in TF1 and run
 lightmoss-install-emmc again: it replaces the system and keeps SPRUCEOS.

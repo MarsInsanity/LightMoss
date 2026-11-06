@@ -64,6 +64,8 @@ BR2_TARGET_ROOTFS_EXT2_SIZE="1024M"
 BR2_PACKAGE_HOST_DOSFSTOOLS=y
 BR2_PACKAGE_HOST_GENIMAGE=y
 BR2_PACKAGE_HOST_MTOOLS=y
+# mkimage, for the updater's uInitrd.
+BR2_PACKAGE_HOST_UBOOT_TOOLS=y
 
 # --- Hardware: firmware, GPU, audio, input ------------------------------------------
 BR2_PACKAGE_LINUX_FIRMWARE=y

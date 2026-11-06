@@ -1,0 +1,33 @@
+From: LightMoss <lightmoss@localhost>
+Subject: [PATCH] arm64: dts: rockchip: r36sclone: the blue LED is active low
+
+The blue front LED that stands in for the rumble motor lights when
+gpio0 PA0 is low: with GPIO_ACTIVE_HIGH it was on all the time, went
+dark while spruce vibrated, and stayed lit through suspend. Active low
+gives what the node meant: lit while an effect plays, off otherwise,
+asleep included.
+---
+diff --git a/arch/arm64/boot/dts/rockchip/rk3326-r36sclone-linux.dts b/arch/arm64/boot/dts/rockchip/rk3326-r36sclone-linux.dts
+--- a/arch/arm64/boot/dts/rockchip/rk3326-r36sclone-linux.dts	2026-11-06 20:10:53.053023543 +0000
++++ b/arch/arm64/boot/dts/rockchip/rk3326-r36sclone-linux.dts	2026-11-06 20:10:53.070500135 +0000
+@@ -68,12 +68,15 @@
+ 		/*
+ 		 * The G80CA has no rumble motor. Its blue front LED (gpio0 PA0,
+ 		 * arkos4clone's led-blue) stands in for one, the way spruce blinks
+-		 * the LED on the MagicX Zero 28: the driver drives this pin while a
+-		 * force-feedback effect plays, so spruce's vibrate (Game Switcher,
+-		 * held power/menu buttons, low battery) and game rumble light it.
+-		 * Off otherwise, after the driver's 1 s rumble at probe.
++		 * the LED on the MagicX Zero 28: lit while a force-feedback effect
++		 * plays (spruce's vibrate: Game Switcher, held power/menu buttons, low
++		 * battery; game rumble), and for a second when the joypad probes at
++		 * boot. Off otherwise, asleep included.
++		 *
++		 * The LED lights when the pin is low (checked on a G80CA-MB: with
++		 * GPIO_ACTIVE_HIGH it was on all the time and went dark on rumble).
+ 		 */
+-		rumble-gpio = <&gpio0 RK_PA0 GPIO_ACTIVE_HIGH>;
++		rumble-gpio = <&gpio0 RK_PA0 GPIO_ACTIVE_LOW>;
+ 
+ 		/* gpio pincontrol setup */
+ 		pinctrl-names = "default";
