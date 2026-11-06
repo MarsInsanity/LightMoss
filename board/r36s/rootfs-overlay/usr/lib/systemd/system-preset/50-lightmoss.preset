@@ -14,6 +14,9 @@ disable dropbear.service
 # NetworkManager starts it over D-Bus when there is a Wi-Fi device.
 disable wpa_supplicant.service
 disable NetworkManager-wait-online.service
+# networkd is not built; the kernel has no audit consumer here.
+disable systemd-network-generator.service
+disable systemd-journald-audit.socket
 # tty1 belongs to spruce: nothing logs in on a console.
 disable getty@.service
 disable serial-getty@.service
