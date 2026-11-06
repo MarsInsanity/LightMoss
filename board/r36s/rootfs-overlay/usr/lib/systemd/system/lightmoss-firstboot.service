@@ -1,0 +1,13 @@
+[Unit]
+Description=LightMoss first boot: add the SPRUCEOS partition behind the system
+ConditionPathExists=!/var/lib/lightmoss/firstboot.done
+After=local-fs.target lightmoss-boot.service
+Before=spruce-launch.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/lightmoss/firstboot
+
+[Install]
+WantedBy=multi-user.target

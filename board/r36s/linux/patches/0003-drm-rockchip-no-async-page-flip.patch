@@ -1,0 +1,31 @@
+From b123d4f9e3c947e44edea25c66ff3d8e0222fb93 Mon Sep 17 00:00:00 2001
+From: arkun <56165886+CatalyticArkun@users.noreply.github.com>
+Date: Fri, 9 Oct 2026 15:32:28 -0500
+Subject: [PATCH] drm/rockchip: don't advertise async page flips
+
+The CRTC page_flip is drm_atomic_helper_page_flip, which returns -EINVAL for
+DRM_MODE_PAGE_FLIP_ASYNC; SDL2 trusts the cap at swap interval 0 and never flips.
+---
+ drivers/gpu/drm/rockchip/rockchip_drm_fb.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_fb.c b/drivers/gpu/drm/rockchip/rockchip_drm_fb.c
+index c9e6faded..3ee89a508 100644
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_fb.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_fb.c
+@@ -415,7 +415,11 @@ void rockchip_drm_mode_config_init(struct drm_device *dev)
+ 	 */
+ 	dev->mode_config.max_width = 8192;
+ 	dev->mode_config.max_height = 8192;
+-	dev->mode_config.async_page_flip = true;
++	/*
++	 * Not advertised: the CRTC page_flip is drm_atomic_helper_page_flip, which
++	 * rejects DRM_MODE_PAGE_FLIP_ASYNC, so clients that trust the cap never flip.
++	 */
++	dev->mode_config.async_page_flip = false;
+ 
+ 	dev->mode_config.funcs = &rockchip_drm_mode_config_funcs;
+ }
+-- 
+2.47.3
+

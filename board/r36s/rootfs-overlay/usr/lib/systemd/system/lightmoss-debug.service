@@ -1,0 +1,12 @@
+[Unit]
+Description=Export LightMoss logs to the boot partition
+# The flag file is the switch; systemd re-checks it every boot.
+ConditionPathExists=/boot/lightmoss-debug
+After=systemd-journal-flush.service multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/lightmoss/debug-export
+
+[Install]
+WantedBy=multi-user.target

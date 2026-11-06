@@ -1,0 +1,25 @@
+LightMoss for the R36S clone (G80CA-MB board)
+=============================================
+
+This image is for the G80CA-MB board (G80CA-MB V1.2 and V1.3 on the board's
+silkscreen), not for a genuine R36S. G80CA units ship with one of two screens,
+"Panel 8" and "Panel 9". At power-on the boot loader asks the screen for its
+ID and picks the matching one, starting from Panel 8.
+
+If the screen stays dark (the power LED is on but nothing ever shows):
+  1. Put this card in a PC.
+  2. Rename "uboot.dtb" to "uboot-panel8.dtb".
+  3. Rename "uboot-panel9.dtb" to "uboot.dtb".
+  4. Boot the device again.
+To go back, rename the files the other way round.
+
+Create an empty "lightmoss-debug" file here (see README-LightMoss.txt) to have
+the logs record which panel was detected: look for panel_id and panel_node in
+the kernel command line at the top of dmesg.log.
+
+Headphones
+----------
+Sound moves to the headphones when they are plugged in and back to the
+speaker when they come out. If it works the wrong way round (speaker with
+headphones in, silence without), create an empty file named
+"headphones-invert" here: G80CA boards differ in how they report the jack.

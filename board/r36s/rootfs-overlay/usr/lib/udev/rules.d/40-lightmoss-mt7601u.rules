@@ -1,0 +1,3 @@
+# MT7601U dongles that first show up as a driver CD (148f:2878): switch them to
+# the Wi-Fi device (148f:7601) the mt7601u driver binds to.
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="148f", ATTR{idProduct}=="2878", RUN+="/usr/sbin/usb_modeswitch -v 148f -p 2878 -K"

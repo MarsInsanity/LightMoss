@@ -1,0 +1,46 @@
+#!/bin/sh
+# LightMoss first boot: put an exFAT partition, "SPRUCEOS", in the space left
+# behind the system on its own disk (TF1 or the eMMC), so spruce can also run
+# from the same card. mount-spruce prefers a card in the other slot, and only
+# uses this partition once spruce has been copied onto it.
+. /usr/libexec/lightmoss/lib.sh
+
+done_flag() {
+	mkdir -p /var/lib/lightmoss
+	touch /var/lib/lightmoss/firstboot.done
+	sync
+}
+
+disk="$(lm_root_disk)" || exit 1
+dev="/dev/$disk"
+p3="$(lm_part "$disk" 3)"
+
+# Already partitioned (a card set up by hand, or a second first boot).
+if [ -e "/sys/block/$disk/${p3#/dev/}" ]; then
+	done_flag
+	exit 0
+fi
+
+sectors="$(cat "/sys/block/$disk/size")"
+p2="${disk}$(case "$disk" in *[0-9]) echo p ;; esac)2"
+p2_end=$(( $(cat "/sys/block/$disk/$p2/start") + $(cat "/sys/block/$disk/$p2/size") ))
+start=$(( (p2_end + 2047) / 2048 * 2048 ))
+free=$(( sectors - start ))
+
+# Less than 256 MB behind the system: nothing worth a partition.
+if [ "$free" -lt $(( 256 * 2048 )) ]; then
+	done_flag
+	exit 0
+fi
+
+lm_say "First boot: setting up the card..."
+echo "creating SPRUCEOS: $dev from sector $start, $((free / 2048)) MB"
+# Type 7 (exFAT). The disk is in use, so tell the kernel about just this
+# partition instead of re-reading the whole table.
+echo "$start,,7" | sfdisk --append --no-reread --no-tell-kernel "$dev" || exit 1
+partx --add --nr 3 "$dev" || partx --update --nr 3 "$dev"
+n=0
+while [ ! -b "$p3" ] && [ "$n" -lt 20 ]; do sleep 0.5; n=$((n + 1)); done
+mkfs.exfat -L SPRUCEOS "$p3" || exit 1
+printf '\033[2J\033[H' > /dev/tty1 2>/dev/null
+done_flag
