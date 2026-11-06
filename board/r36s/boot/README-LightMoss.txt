@@ -56,6 +56,10 @@ instead, also put an empty lightmoss-install on the card in TF1.)
 The image is checked and written to the internal eMMC (an existing LightMoss
 keeps SPRUCEOS and its settings), LightMoss.rkimg is renamed
 LightMoss.rkimg.done, lightmoss-install is removed, and the device restarts.
+
+If the eMMC shows a "no SD card" screen and powers off when TF1 is empty, it
+holds an older LightMoss: update it the same way as a first install (this
+card in TF1, LightMoss.rkimg on the spruce card, lightmoss-install here).
 Take the LightMoss card out of TF1 to boot from the eMMC. Without the charger
 connected nothing is written.
 
