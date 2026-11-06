@@ -1,0 +1,108 @@
+#!/bin/sh
+# One-off LED test: finds which pin, in which state, darkens the G80CA's
+# blue LED, without SSH. Runs before spruce when BOOT holds an empty file
+# named "lightmoss-ledtest", and deletes it, so it runs once.
+#
+# Each numbered step holds one pin in one state for a few seconds while the
+# screen shows the step number: note the steps at which the LED is OFF.
+# Every pin is put back as it was after its steps. The pins (GPIO0, by
+# register, so the joypad's own rumble pin can be tried too):
+#   PA0  the LED as the joypad has it (arkos4clone's led-blue)
+#   PC1  arkos4clone's led-red; "Blue LED" in the G80CA U-Boot device tree
+#   PB5  U-Boot's charge LED (it drives it low at every boot)
+# The pin states before the test and each step go to BOOT as
+# lightmoss-ledtest.txt.
+. /usr/libexec/lightmoss/lib.sh
+
+FLAG=/boot/lightmoss-ledtest
+LOG=/boot/lightmoss-ledtest.txt
+HOLD=7
+
+# GPIO0's data and direction registers (RK3326 = PX30): a set DDR bit is an
+# output, which drives its DR bit.
+DR=0xff040000
+DDR=0xff040004
+
+[ -e "$FLAG" ] || exit 0
+rm -f "$FLAG"
+sync
+
+reg() { echo $(($(devmem "$1" 32))); }
+
+# pin_state BIT: what the pin does now.
+pin_state() {
+	m=$((1 << $1))
+	if [ $(($(reg $DDR) & m)) -eq 0 ]; then
+		echo "released (input)"
+	elif [ $(($(reg $DR) & m)) -eq 0 ]; then
+		echo "driven low"
+	else
+		echo "driven high"
+	fi
+}
+
+# pin_set BIT low|high|released
+pin_set() {
+	m=$((1 << $1))
+	case "$2" in
+	low)      devmem $DR 32 $(($(reg $DR) & ~m & 0xffffffff))
+	          devmem $DDR 32 $(($(reg $DDR) | m)) ;;
+	high)     devmem $DR 32 $(($(reg $DR) | m))
+	          devmem $DDR 32 $(($(reg $DDR) | m)) ;;
+	released) devmem $DDR 32 $(($(reg $DDR) & ~m & 0xffffffff)) ;;
+	esac
+}
+
+# Back to the DR and DDR bits saved before the pin's steps.
+pin_restore() {
+	m=$((1 << $1))
+	devmem $DR 32 $(( ($(reg $DR) & ~m & 0xffffffff) | $2 ))
+	devmem $DDR 32 $(( ($(reg $DDR) & ~m & 0xffffffff) | $3 ))
+}
+
+show() {
+	lm_say "LED test. Watch the blue LED.
+
+  $1"
+	echo "$1" >> "$LOG"
+}
+
+{
+	echo "LightMoss LED test, $(date)"
+	echo "GPIO0 DR=$(devmem $DR 32) DDR=$(devmem $DDR 32)"
+	for p in 0:PA0 17:PC1 13:PB5; do
+		echo "${p#*:}: $(pin_state "${p%%:*}")"
+	done
+	echo "--- gpio"
+	cat /sys/kernel/debug/gpio 2>&1
+	echo "---"
+} > "$LOG" 2>&1
+
+show "Write down the step numbers at which the LED is OFF.
+  Starting in a few seconds..."
+sleep 6
+
+step=0
+for p in 0:PA0:low,high,released 17:PC1:low,high 13:PB5:low,high; do
+	bit="${p%%:*}"; rest="${p#*:}"; name="${rest%%:*}"; states="${rest#*:}"
+	m=$((1 << bit))
+	sdr=$(($(reg $DR) & m)); sddr=$(($(reg $DDR) & m))
+	for s in $(echo "$states" | tr , ' '); do
+		step=$((step + 1))
+		pin_set "$bit" "$s"
+		show "STEP $step of 7
+
+  (GPIO0_$name $s)"
+		sleep "$HOLD"
+	done
+	pin_restore "$bit" "$sdr" "$sddr"
+	echo "$name restored: $(pin_state "$bit")" >> "$LOG"
+done
+
+show "Done. Which step numbers had the LED OFF?
+  (The answer is all that is needed; the details are in
+  lightmoss-ledtest.txt on BOOT.)"
+sync
+sleep 10
+lm_say ""
+exit 0

@@ -15,7 +15,7 @@ nothing else.
 
 | | |
 |---|---|
-| Kernel | christianhaitian's `rg351` 4.4 BSP kernel (as dArkOS/dArkMoss), with BobMoss's G80CA device trees (Panel 8 and Panel 9), lcdyk0517's odroidgo3 joypad driver, the rk817 fuel-gauge fix, the DRM async-flip fix, the VT CSI fix, and the internal eMMC enabled. ~20 modules instead of ~560. |
+| Kernel | christianhaitian's `rg351` 4.4 BSP kernel (as dArkOS/dArkMoss), with BobMoss's G80CA device trees (Panel 8 and Panel 9), lcdyk0517's odroidgo3 joypad driver, the rk817 fuel-gauge fix, the DRM async-flip fix, the VT CSI fix, the internal eMMC enabled, and the blue front LED in place of rumble (off unless an effect plays: the pin is released, not driven). ~20 modules instead of ~560. |
 | Boot loader | christianhaitian's RG351MP U-Boot with BobMoss's G80CA board and panel-ID check, plus a fallback to the internal eMMC when TF1 has no system. Charging while switched off shows a battery that fills up, with the voltage and charge current below it. |
 | GPU | Mali-G31 blob (`libmali-bifrost-g31-rxp0-gbm`, the build that matches the kernel's r12p0 driver): EGL, GLES 1/2/3, GBM. |
 | Wi-Fi | MT7601U USB dongles on the OTG port (driver + firmware; dongles that first appear as a driver CD are switched with usb_modeswitch). No other Wi-Fi drivers. |
@@ -155,6 +155,7 @@ on hardware yet; test from TF1 first.
 | `logo.bmp`, `battery_*.bmp` | boot logo, and the charging screen's pictures (drawn by `board/r36s/make-charge-images.py`) |
 | `lightmoss-debug` (create it) | kernel and systemd text on screen, logs exported to `logs/` |
 | `headphones-invert` (create it) | for boards that report the headphone jack the other way round |
+| `lightmoss-ledtest` (create it) | one-off, before spruce: 7 numbered steps that drive the blue LED's candidate pins (GPIO0 PA0, PC1, PB5) low, high and released; note the steps with the LED off. Details in `lightmoss-ledtest.txt` |
 
 ## Layout of this repository
 

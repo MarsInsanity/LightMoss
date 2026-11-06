@@ -1,0 +1,69 @@
+From: LightMoss <lightmoss@localhost>
+Subject: [PATCH] Input: odroidgo3-joypad: rumble-gpio-hiz-off
+
+An LED in place of a rumble motor may be dark only while its pin is not
+driven at all. With the new boolean property rumble-gpio-hiz-off, the
+rumble GPIO is an input (released) while no effect plays and at probe,
+and is driven to its active level while one plays.
+---
+--- a/drivers/input/joystick/odroidgo3-joypad.c
++++ b/drivers/input/joystick/odroidgo3-joypad.c
+@@ -175,6 +175,7 @@
+ 	/* 可选 GPIO 振动器 */
+ 	int rumble_gpio;
+ 	bool rumble_active_low;		/* GPIO 有效低电平 */
++	bool rumble_hiz_off;		/* off: release the pin (input), not drive it */
+ 	bool has_rumble;		/* 是否有振动功能 */
+ 
+ 	/* 摇杆切换功能（按住切换键时左摇杆→右摇杆） */
+@@ -225,6 +226,19 @@
+ static inline void rumble_gpio_set(struct joypad *joypad, bool on)
+ {
+ 	int val = on ? 1 : 0;
++
++	/*
++	 * rumble-gpio-hiz-off: an LED in place of a motor that is dark only
++	 * while the pin is not driven; on drives it to its active level.
++	 */
++	if (joypad->rumble_hiz_off) {
++		if (on)
++			gpio_direction_output(joypad->rumble_gpio,
++					      joypad->rumble_active_low ? 0 : 1);
++		else
++			gpio_direction_input(joypad->rumble_gpio);
++		return;
++	}
+ 	if (joypad->rumble_active_low)
+ 		val = !val;
+ 	gpio_set_value(joypad->rumble_gpio, val);
+@@ -2535,6 +2549,8 @@
+ 
+ 	joypad->rumble_gpio = gpio;
+ 	joypad->rumble_active_low = !!(gflags & OF_GPIO_ACTIVE_LOW);
++	joypad->rumble_hiz_off = of_property_read_bool(dev->of_node,
++						       "rumble-gpio-hiz-off");
+ 
+ 	err = devm_gpio_request(dev, joypad->rumble_gpio, "rumble-gpio");
+ 	if (err) {
+@@ -2543,13 +2559,17 @@
+ 	}
+ 
+ 	/* 将GPIO设置为非活动状态 (马达关闭) */
+-	err = gpio_direction_output(joypad->rumble_gpio,
+-		joypad->rumble_active_low ? 1 : 0);
++	if (joypad->rumble_hiz_off)
++		err = gpio_direction_input(joypad->rumble_gpio);
++	else
++		err = gpio_direction_output(joypad->rumble_gpio,
++			joypad->rumble_active_low ? 1 : 0);
+ 	if (err)
+ 		return err;
+ 
+-	dev_info(dev, "rumble via GPIO: gpio=%d active_low=%d\n",
+-		 joypad->rumble_gpio, joypad->rumble_active_low);
++	dev_info(dev, "rumble via GPIO: gpio=%d active_low=%d hiz_off=%d\n",
++		 joypad->rumble_gpio, joypad->rumble_active_low,
++		 joypad->rumble_hiz_off);
+ 
+ 	return 0;
+ }

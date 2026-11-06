@@ -1,0 +1,13 @@
+[Unit]
+Description=LightMoss LED test (once, when BOOT holds lightmoss-ledtest)
+ConditionPathExists=/boot/lightmoss-ledtest
+After=lightmoss-boot.service local-fs.target systemd-udev-trigger.service
+Before=spruce-launch.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/lightmoss/ledtest
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

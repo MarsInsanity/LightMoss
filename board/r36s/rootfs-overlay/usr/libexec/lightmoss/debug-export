@@ -34,6 +34,9 @@ dmesg                       > "$OUT/dmesg.log"         2>/dev/null
 	echo; echo "--- suspend"; echo "states: $(cat /sys/power/state)"
 	cat /sys/kernel/debug/suspend_stats 2>&1
 	echo; echo "--- wakeup sources"; cat /sys/kernel/debug/wakeup_sources 2>&1 | awk 'NR == 1 || $2 > 0'
+	echo; echo "--- gpio"; cat /sys/kernel/debug/gpio 2>&1
+	echo "GPIO0 DR=$(devmem 0xff040000 32 2>&1) DDR=$(devmem 0xff040004 32 2>&1)"
+	dmesg | grep -i 'rumble' 2>&1
 } > "$OUT/system.txt" 2>&1
 
 [ -f /mnt/SDCARD/Saves/spruce/spruce.log ] && cp -f /mnt/SDCARD/Saves/spruce/spruce.log "$OUT/" 2>/dev/null

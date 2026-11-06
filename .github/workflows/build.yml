@@ -11,9 +11,12 @@ on:
     paths-ignore: ['**.md', 'LICENSE']
   workflow_dispatch:
 
+# A push while a build runs waits for it (and replaces any older waiting
+# one): a cancelled build saves no cache, so cancelling each one on the next
+# push left every build starting from nothing.
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -52,8 +55,12 @@ jobs:
           echo "LIGHTMOSS_VERSION=$v" >> "$GITHUB_ENV"
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
-      - name: Cache downloads
-        uses: actions/cache@v4
+      # Restored here, saved after the build even when it fails: a failed
+      # build's downloads and compiler cache still spare the next one most
+      # of its work.
+      - name: Restore downloads
+        id: dl-cache
+        uses: actions/cache/restore@v4
         with:
           # The tarballs only: buildroot's git caches (the kernel's alone is
           # ~7 GB of history) are rebuilt from scratch when needed.
@@ -63,8 +70,8 @@ jobs:
           key: dl-${{ hashFiles('configs/*_defconfig', 'Makefile', 'package/**/*.mk') }}
           restore-keys: dl-
 
-      - name: Cache ccache
-        uses: actions/cache@v4
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
         with:
           path: ccache
           key: ccache-${{ github.run_id }}
@@ -89,6 +96,22 @@ jobs:
       - name: Build log
         if: failure()
         run: tail -n 300 build.log
+
+      - name: Save downloads
+        if: always() && steps.dl-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            dl
+            !dl/*/git
+          key: dl-${{ hashFiles('configs/*_defconfig', 'Makefile', 'package/**/*.mk') }}
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ccache
+          key: ccache-${{ github.run_id }}
 
       - name: Upload image
         uses: actions/upload-artifact@v4
