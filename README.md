@@ -16,7 +16,7 @@ nothing else.
 | | |
 |---|---|
 | Kernel | christianhaitian's `rg351` 4.4 BSP kernel (as dArkOS/dArkMoss), with BobMoss's G80CA device trees (Panel 8 and Panel 9), lcdyk0517's odroidgo3 joypad driver, the rk817 fuel-gauge fix, the DRM async-flip fix, the VT CSI fix, and the internal eMMC enabled. ~20 modules instead of ~560. |
-| Boot loader | christianhaitian's RG351MP U-Boot with BobMoss's G80CA board and panel-ID check, plus a fallback to the internal eMMC when TF1 has no system. |
+| Boot loader | christianhaitian's RG351MP U-Boot with BobMoss's G80CA board and panel-ID check, plus a fallback to the internal eMMC when TF1 has no system. Charging while switched off shows a battery that fills up, with the voltage and charge current below it. |
 | GPU | Mali-G31 blob (`libmali-bifrost-g31-rxp0-gbm`, the build that matches the kernel's r12p0 driver): EGL, GLES 1/2/3, GBM. |
 | Wi-Fi | MT7601U USB dongles on the OTG port (driver + firmware; dongles that first appear as a driver CD are switched with usb_modeswitch). No other Wi-Fi drivers. |
 | Hardware | Joypad and both sticks, volume keys, power key, rk817 audio with automatic headphone switching (`hpjackd`), rk817 battery/charger, backlight, both TF slots, eMMC, suspend, USB host on the OTG port (dongle, USB pad, USB DAC). |
@@ -121,6 +121,7 @@ on hardware yet; test from TF1 first.
 | `boot.ini` | U-Boot boot script |
 | `Image`, `rk3326-r36sclone-*.dtb` | kernel, and the device tree for each panel |
 | `uboot.dtb`, `uboot-panel9.dtb` | U-Boot's board device tree (see `R36S-PANEL.txt` if the screen stays dark) |
+| `logo.bmp`, `battery_*.bmp` | boot logo, and the charging screen's pictures (drawn by `board/r36s/make-charge-images.py`) |
 | `lightmoss-debug` (create it) | kernel and systemd text on screen, logs exported to `logs/` |
 | `headphones-invert` (create it) | for boards that report the headphone jack the other way round |
 
