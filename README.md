@@ -16,7 +16,7 @@ nothing else.
 | | |
 |---|---|
 | Kernel | christianhaitian's `rg351` 4.4 BSP kernel (as dArkOS/dArkMoss), with BobMoss's G80CA device trees (Panel 8 and Panel 9), lcdyk0517's odroidgo3 joypad driver, the rk817 fuel-gauge fix, the DRM async-flip fix, the VT CSI fix, the internal eMMC enabled, and the blue front LED in place of rumble (off unless an effect plays: the pin is released, not driven). ~20 modules instead of ~560. |
-| Boot loader | christianhaitian's RG351MP U-Boot with BobMoss's G80CA board and panel-ID check, plus a fallback to the internal eMMC when TF1 has no system. Charging while switched off shows a battery that fills up, with the voltage and charge current below it. |
+| Boot loader | christianhaitian's RG351MP U-Boot with BobMoss's G80CA board and panel-ID check, plus a fallback to the internal eMMC when TF1 has no system (TF1 empty included: the stock "no SD card" power-off is skipped when the eMMC holds LightMoss). Charging while switched off shows a battery that fills up, with the voltage and charge current below it. |
 | GPU | Mali-G31 blob (`libmali-bifrost-g31-rxp0-gbm`, the build that matches the kernel's r12p0 driver): EGL, GLES 1/2/3, GBM. |
 | Wi-Fi | MT7601U USB dongles on the OTG port (driver + firmware; dongles that first appear as a driver CD are switched with usb_modeswitch). No other Wi-Fi drivers. |
 | Hardware | Joypad and both sticks, volume keys, power key, rk817 audio with automatic headphone switching (`hpjackd`), rk817 battery/charger, backlight, both TF slots, eMMC, suspend, USB host on the OTG port (dongle, USB pad, USB DAC). |
@@ -142,8 +142,14 @@ machine ID; `--wipe` starts over instead. The base OS holds no spruce data
 (spruce keeps everything on its own card, Wi-Fi networks included), so
 nothing else is lost.
 
-The eMMC path (U-Boot's eMMC fallback and the installer) has not been tested
-on hardware yet; test from TF1 first.
+**An eMMC that powers off after a few seconds with TF1 empty** holds a
+LightMoss from before 2026-11-06 (U-Boot then showed its "no SD card" screen and
+powered off instead of booting the eMMC). Update it as for a first install:
+current LightMoss on the TF1 card, `LightMoss.rkimg` on the spruce card in TF2,
+an empty `lightmoss-install` on the TF1 card's BOOT, charger, power on.
+
+The eMMC boot itself (U-Boot's fallback with TF1 empty) has not been
+confirmed on hardware yet.
 
 ## The BOOT partition
 

@@ -1,0 +1,43 @@
+LightMoss: boot from the eMMC with TF1 empty; boot logo from the eMMC too.
+
+With no card in TF1, board_check_mandatory_files() showed the "no SD
+card" screen and powered off after 10 seconds, before cfgload could
+start the system on the internal eMMC (patch 0004). It now carries on
+when the eMMC's BOOT holds boot.ini. The boot logo (logo.bmp) was read
+from TF1 only; the eMMC's BOOT is tried next, before SPI flash.
+
+--- a/board/rockchip/odroidgoa/odroidgoa.c
++++ b/board/rockchip/odroidgoa/odroidgoa.c
+@@ -163,6 +163,13 @@
+ 	/* check sd card existence */
+ 	if (CMD_RET_SUCCESS != run_command("mmc dev 1", 0)) {
+ 		if(CMD_RET_SUCCESS != run_command("mmc dev 1", 0)) {
++			/*
++			 * LightMoss: TF1 may well be empty when the system is on
++			 * the internal eMMC (mmc 0), which cfgload boots next.
++			 * Without this the "no SD card" screen powers off.
++			 */
++			if (file_exists("mmc", "0:1", "boot.ini", FS_TYPE_FAT))
++				return;
+ 			odroid_display_status(LOGO_MODE_NO_SDCARD,
+ 				LOGO_STORAGE_ANYWHERE, NULL);
+ 			goto err;
+--- a/drivers/video/drm/rockchip_display_cmds.c
++++ b/drivers/video/drm/rockchip_display_cmds.c
+@@ -490,6 +490,16 @@
+ 
+ 	/* load file size check */
+ 	filesize = env_get_ulong("filesize", 16, 0);
++
++	/* LightMoss: then BOOT on the internal eMMC (mmc 0), as cfgload does */
++	if ((!filesize) || (filesize >= LCD_LOGO_SIZE)) {
++		env_set("filesize", "0");
++		sprintf(cmd, "fatload mmc 0:1 %p %s",
++				(void *)bmp_mem, logo_fname);
++		run_command(cmd, 0);
++		filesize = env_get_ulong("filesize", 16, 0);
++	}
++
+ 	if ((!filesize) || (filesize >= LCD_LOGO_SIZE)) {
+ 		printf("%s file not found! filesize = %ld\n",
+ 			logo_fname, filesize);
