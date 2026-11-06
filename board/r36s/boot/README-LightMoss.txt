@@ -29,3 +29,6 @@ Boot LightMoss from TF1, then over SSH run:
 It copies this system to the eMMC (everything on the eMMC is erased) and
 gives it its own disk ID. Afterwards, with no LightMoss card in TF1, the
 device boots from the eMMC; a LightMoss card in TF1 still takes precedence.
+
+To update the eMMC later, boot a card with the newer LightMoss in TF1 and run
+lightmoss-install-emmc again: it replaces the system and keeps SPRUCEOS.

@@ -1,18 +1,37 @@
 #!/bin/sh
-# Copy the running LightMoss (booted from TF1) onto the internal eMMC.
+# Put the running LightMoss (booted from a TF1 card) on the internal eMMC.
 #
-# EVERYTHING on the eMMC is erased (on most G80CA units: EmuELEC). The copy gets
-# the same layout as the card: the Rockchip loader in the raw sectors, BOOT,
-# the root filesystem, and on its first boot the SPRUCEOS partition in the rest.
-# It gets its own disk signature, so root=PARTUUID never confuses it with the
-# card. Afterwards a LightMoss card in TF1 still boots first; take it out to
-# boot from the eMMC.
+#   lightmoss-install-emmc [-y] [--wipe]
 #
-#   lightmoss-install-emmc [-y]
+# Install, when the eMMC holds anything but LightMoss (EmuELEC on most G80CA
+# units), or with --wipe: EVERYTHING on the eMMC is erased. It gets the card's
+# layout (the Rockchip loader in the raw sectors, BOOT, the system partition)
+# and its own disk signature, so root=PARTUUID never confuses it with the
+# card; its first boot adds the SPRUCEOS partition in the rest.
+#
+# Update, when the eMMC already holds LightMoss: boot a card with the newer
+# LightMoss in TF1 and run this again. Only the loader, BOOT and the system
+# partition are rewritten. The partition table, the SPRUCEOS partition (and
+# spruce on it), the disk signature, the machine ID and the SSH host keys
+# stay. The eMMC's system is not running while the card is, so it is
+# rewritten whole rather than patched in place.
+#
+# A LightMoss card in TF1 always boots before the eMMC: take it out to boot
+# from the eMMC, put one in to repair or update it.
 set -eu
 . /usr/libexec/lightmoss/lib.sh
 
 die() { echo "lightmoss-install-emmc: $*" >&2; exit 1; }
+label() { blkid -o value -s LABEL "$1" 2>/dev/null; }
+
+yes=0; wipe=0
+for a in "$@"; do
+	case "$a" in
+		-y) yes=1 ;;
+		--wipe) wipe=1 ;;
+		*) die "usage: lightmoss-install-emmc [-y] [--wipe]" ;;
+	esac
+done
 
 root="$(lm_root_disk)" || die "cannot tell which disk / is on"
 emmc=""
@@ -22,17 +41,37 @@ for d in /sys/block/mmcblk*; do
 	[ "$(lm_disk_type "$disk")" = MMC ] && emmc="$disk"
 done
 [ -n "$emmc" ] || die "no eMMC found"
-[ "$emmc" != "$root" ] || die "this system is already running from the eMMC"
+[ "$emmc" != "$root" ] || die "this system is running from the eMMC: boot a LightMoss card in TF1 to install or update"
 
 size_mb=$(( $(cat "/sys/block/$emmc/size") / 2048 ))
 [ "$size_mb" -ge 1536 ] || die "the eMMC is only ${size_mb} MB"
 
 boot_sectors="$(cat "/sys/block/$root/$(basename "$(lm_part "$root" 1)")/size")"
 root_sectors="$(cat "/sys/block/$root/$(basename "$(lm_part "$root" 2)")/size")"
+e1="$(lm_part "$emmc" 1)"; e2="$(lm_part "$emmc" 2)"
 
-if [ "${1:-}" != "-y" ]; then
-	echo "This copies LightMoss from /dev/$root to the internal eMMC, /dev/$emmc (${size_mb} MB)."
-	echo "EVERYTHING ON THE eMMC WILL BE ERASED."
+# An eMMC laid out by this script before: update it rather than start over.
+mode=install
+if [ "$wipe" = 0 ] && [ -b "$e1" ] && [ -b "$e2" ] &&
+   [ "$(label "$e1")" = BOOT ] && [ "$(label "$e2")" = LIGHTMOSS ] &&
+   [ "$(cat "/sys/block/$emmc/${e1#/dev/}/start")" = 32768 ]; then
+	mode=update
+	# The system must fit the eMMC's system partition (with 10% to spare).
+	used_kb="$(df -k / | awk 'END { print $3 }')"
+	have_kb=$(( $(cat "/sys/block/$emmc/${e2#/dev/}/size") / 2 ))
+	[ $(( used_kb + used_kb / 10 )) -le "$have_kb" ] ||
+		die "this system (${used_kb} KB) does not fit the eMMC's system partition (${have_kb} KB): use --wipe"
+fi
+
+if [ "$yes" = 0 ]; then
+	if [ "$mode" = update ]; then
+		echo "This updates LightMoss on the internal eMMC, /dev/$emmc, from /dev/$root."
+		echo "The eMMC's system partition and BOOT are replaced. SPRUCEOS (and spruce"
+		echo "on it), the SSH host keys and the machine ID are kept."
+	else
+		echo "This copies LightMoss from /dev/$root to the internal eMMC, /dev/$emmc (${size_mb} MB)."
+		echo "EVERYTHING ON THE eMMC WILL BE ERASED."
+	fi
 	printf 'Type "yes" to continue: '
 	read -r answer
 	[ "$answer" = yes ] || die "cancelled"
@@ -42,14 +81,35 @@ for m in $(awk -v d="/dev/$emmc" 'index($1, d) == 1 { print $2 }' /proc/mounts);
 	umount "$m" || die "cannot unmount $m"
 done
 
-sig="$(od -An -N4 -tx4 /dev/urandom | tr -d ' \n')"
-[ "$sig" != 4c4d3336 ] || sig=4c4d4531
+mnt="$(mktemp -d)"
+trap 'umount "$mnt/boot" "$mnt/root" "$mnt/src" "$mnt/old" 2>/dev/null; rm -rf "$mnt"' EXIT
+mkdir -p "$mnt/boot" "$mnt/root" "$mnt/src" "$mnt/old" "$mnt/keep"
+
+if [ "$mode" = update ]; then
+	# Keep the disk signature boot.ini points at, and the identity of the
+	# installed system: machine ID (its journal) and SSH host keys.
+	sig="$(od -An -tx4 -j 440 -N 4 "/dev/$emmc" | tr -d ' \n')"
+	mount -o ro "$e2" "$mnt/old"
+	cp -a "$mnt/old/etc/machine-id" "$mnt/keep/" 2>/dev/null || true
+	[ -d "$mnt/old/etc/dropbear" ] && cp -a "$mnt/old/etc/dropbear" "$mnt/keep/"
+	umount "$mnt/old"
+	mount -o ro "$e1" "$mnt/old"
+	[ -e "$mnt/old/headphones-invert" ] && touch "$mnt/keep/headphones-invert"
+	umount "$mnt/old"
+	echo "Updating LightMoss on /dev/$emmc (disk signature 0x$sig)"
+else
+	sig="$(od -An -N4 -tx4 /dev/urandom | tr -d ' \n')"
+	[ "$sig" != 4c4d3336 ] || sig=4c4d4531
+	echo "Installing LightMoss on /dev/$emmc (disk signature 0x$sig)"
+fi
+
 echo "1/5 boot loader"
 # Everything between the MBR and BOOT: idbloader (64), uboot (16384), trust (24576).
 dd if="/dev/$root" of="/dev/$emmc" bs=512 skip=64 seek=64 count=$((32768 - 64)) conv=fsync status=none
 
-echo "2/5 partitions (disk signature 0x$sig)"
-sfdisk --quiet --wipe always "/dev/$emmc" <<SFDISK
+if [ "$mode" = install ]; then
+	echo "2/5 partitions"
+	sfdisk --quiet --wipe always "/dev/$emmc" <<SFDISK
 label: dos
 label-id: 0x$sig
 unit: sectors
@@ -57,13 +117,11 @@ unit: sectors
 start=32768, size=$boot_sectors, type=c, bootable
 start=$((32768 + boot_sectors)), size=$root_sectors, type=83
 SFDISK
-blockdev --rereadpt "/dev/$emmc" 2>/dev/null || partx --update "/dev/$emmc"
-sleep 1
-e1="$(lm_part "$emmc" 1)"; e2="$(lm_part "$emmc" 2)"
-
-mnt="$(mktemp -d)"
-trap 'umount "$mnt/boot" "$mnt/root" "$mnt/src" 2>/dev/null; rm -rf "$mnt"' EXIT
-mkdir -p "$mnt/boot" "$mnt/root" "$mnt/src"
+	blockdev --rereadpt "/dev/$emmc" 2>/dev/null || partx --update "/dev/$emmc"
+	sleep 1
+else
+	echo "2/5 partitions: kept"
+fi
 
 echo "3/5 BOOT"
 mkfs.vfat -F 32 -n BOOT "$e1" >/dev/null
@@ -72,10 +130,11 @@ for f in /boot/*; do
 	case "${f##*/}" in logs|lightmoss-debug) continue ;; esac
 	cp -a "$f" "$mnt/boot/"
 done
+[ -e "$mnt/keep/headphones-invert" ] && touch "$mnt/boot/headphones-invert"
 sed -i "s/root=PARTUUID=[0-9a-f]*-02/root=PARTUUID=$sig-02/" "$mnt/boot/boot.ini"
 grep -q "root=PARTUUID=$sig-02" "$mnt/boot/boot.ini" || die "could not point boot.ini at the eMMC"
 
-echo "4/5 root filesystem (this takes a few minutes)"
+echo "4/5 system (this takes a few minutes)"
 mkfs.ext4 -q -F -L LIGHTMOSS "$e2"
 mount "$e2" "$mnt/root"
 # A plain (non-recursive) bind mount shows the root filesystem alone, with
@@ -83,10 +142,19 @@ mount "$e2" "$mnt/root"
 mount --bind / "$mnt/src"
 cp -a "$mnt/src/." "$mnt/root/"
 umount "$mnt/src"
-# A fresh identity and a fresh first boot for the copy.
-: > "$mnt/root/etc/machine-id"
-rm -f "$mnt/root/etc/dropbear/"* "$mnt/root/var/lib/lightmoss/firstboot.done"
 rm -rf "$mnt/root/var/log/journal/"*
+if [ "$mode" = update ]; then
+	# The installed system's identity, back in place.
+	[ -e "$mnt/keep/machine-id" ] && cp -a "$mnt/keep/machine-id" "$mnt/root/etc/machine-id"
+	if [ -d "$mnt/keep/dropbear" ]; then
+		rm -rf "$mnt/root/etc/dropbear"
+		cp -a "$mnt/keep/dropbear" "$mnt/root/etc/dropbear"
+	fi
+else
+	# A fresh identity and a fresh first boot (it adds SPRUCEOS).
+	: > "$mnt/root/etc/machine-id"
+	rm -f "$mnt/root/etc/dropbear/"* "$mnt/root/var/lib/lightmoss/firstboot.done"
+fi
 
 echo "5/5 syncing"
 sync
