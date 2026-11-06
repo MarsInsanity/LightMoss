@@ -6,7 +6,7 @@ BOARD_DIR="$(cd "$(dirname "$0")" && pwd)"
 VERSION="$(cat "${BINARIES_DIR}/lightmoss-version" 2>/dev/null || date +%Y%m%d)"
 
 # BOOT's own files (boot.ini, logo, the text files) next to the kernel and dtbs.
-rm -rf "${BINARIES_DIR}/boot"
+rm -rf "${BINARIES_DIR:?}/boot"
 mkdir -p "${BINARIES_DIR}/boot"
 cp "${BOARD_DIR}"/boot/* "${BINARIES_DIR}/boot/"
 
