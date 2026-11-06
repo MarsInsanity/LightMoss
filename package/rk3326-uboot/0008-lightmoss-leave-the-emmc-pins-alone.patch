@@ -1,0 +1,35 @@
+LightMoss: leave the G80CA's eMMC pins alone.
+
+rk_board_late_init() muxed GPIO1_A0, A1, A4 and B1 to the SPI flash
+controller (board_init_sfc_if) and GPIO1_A2, A5-A7 and B4-B7 to plain
+GPIO for buttons (board_init_switch_gpio). On the boards this was
+written for that is where SPI flash and buttons are; on the G80CA,
+GPIO1_A0-A7 are the internal eMMC's data lines and B1 its clock. Everything after it (the boot logo, the charging pictures,
+the "no SD card" check, cfgload) then failed to read the eMMC, so with
+TF1 empty LightMoss on the eMMC never started: the "no SD card" screen,
+then power-off. Neither is called now.
+
+--- a/board/rockchip/odroidgoa/odroidgoa.c
++++ b/board/rockchip/odroidgoa/odroidgoa.c
+@@ -210,11 +210,21 @@
+ 	/* set uart2-m1 port as a default debug console */
+ 	board_debug_uart2m1();
+ 
++	/*
++	 * LightMoss: neither on the G80CA. Its internal eMMC is on these GPIO1
++	 * pins, where the boards this code was written for have SPI flash and
++	 * buttons: muxing them to SFC and to GPIO cut U-Boot off from the eMMC
++	 * from here on, so a system on it never started with TF1 empty (the
++	 * "no SD card" screen). Linux muxes them for the eMMC itself, which is
++	 * why the eMMC worked there.
++	 */
++#if 0
+ 	/* set sfc alternate function */
+ 	board_init_sfc_if();
+ 
+ 	/* set switch gpio */
+ 	board_init_switch_gpio();
++#endif
+ 
+ 	/* check power */
+ 	if(board_check_power())
