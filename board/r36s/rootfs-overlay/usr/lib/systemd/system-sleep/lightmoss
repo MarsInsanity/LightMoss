@@ -1,11 +1,19 @@
 #!/bin/sh
 # Run by systemd around suspend (spruce's sleep goes through systemctl suspend).
+# Its output goes to the journal (lightmoss-debug exports it to /boot/logs).
 BL=/sys/class/backlight/backlight/brightness
 STATE=/run/lightmoss-sleep
+STATS=/sys/kernel/debug/suspend_stats
 
 case "$1" in
 pre)
 	mkdir -p "$STATE"
+	echo "lightmoss-sleep: entering $2; kernel offers: $(cat /sys/power/state 2>/dev/null)"
+	# Debug boots: the kernel logs every device's suspend/resume callback and
+	# how long it took, so a device that refuses deep sleep shows by name.
+	if grep -qw lightmoss.debug /proc/cmdline; then
+		echo 1 > /sys/power/pm_print_times 2>/dev/null
+	fi
 	# Dark at once, so sleep looks immediate.
 	cat "$BL" > "$STATE/brightness" 2>/dev/null
 	echo 0 > "$BL" 2>/dev/null
@@ -19,6 +27,10 @@ post)
 	alsactl restore -f "$STATE/asound.state" 2>/dev/null
 	[ -f "$STATE/brightness" ] && cat "$STATE/brightness" > "$BL" 2>/dev/null
 	modprobe dwc2 2>/dev/null
+	# How the suspend went, by the kernel's count: "fail" going up, or the
+	# last failed device/step, means deep sleep was refused and systemd fell
+	# back to a lighter state (see systemd-suspend's own log lines).
+	[ -r "$STATS" ] && echo "lightmoss-sleep: back from $2; $(tr -s ' \t\n' ' ' < "$STATS")"
 	;;
 esac
 exit 0
