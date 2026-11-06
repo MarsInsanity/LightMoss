@@ -14,6 +14,22 @@ PYTHON="${HOST_DIR}/bin/python3"
 [ -x "$PYTHON" ] || PYTHON=python3
 "$PYTHON" "${BOARD_DIR}/make-charge-images.py" "${BINARIES_DIR}/boot"
 
+# The updater's initramfs (uInitrd), which boot.ini loads only when TF1 holds a
+# LightMoss.rkimg: the image's own busybox and xz, with their libraries.
+IRD="${BUILD_DIR}/lightmoss-initramfs"
+rm -rf "${IRD:?}"
+mkdir -p "$IRD/bin" "$IRD/lib"
+cp "${TARGET_DIR}/usr/bin/busybox" "${TARGET_DIR}/usr/bin/xz" "$IRD/bin/"
+ln -s busybox "$IRD/bin/sh"
+for l in ld-linux-aarch64.so.1 libc.so.6 libm.so.6 libresolv.so.2 liblzma.so.5; do
+	cp -L "${TARGET_DIR}/usr/lib/$l" "$IRD/lib/"
+done
+install -m 0755 "${BOARD_DIR}/initramfs/init" "$IRD/init"
+( cd "$IRD" && find . | LC_ALL=C sort | cpio -o -H newc -R 0:0 --quiet ) |
+	gzip -9 > "${BINARIES_DIR}/initramfs.cpio.gz"
+"${HOST_DIR}/bin/mkimage" -A arm64 -O linux -T ramdisk -C none -n "LightMoss updater" \
+	-d "${BINARIES_DIR}/initramfs.cpio.gz" "${BINARIES_DIR}/boot/uInitrd" >/dev/null
+
 support/scripts/genimage.sh -c "${BOARD_DIR}/genimage.cfg"
 
 IMG="${BINARIES_DIR}/lightmoss-r36s.img"

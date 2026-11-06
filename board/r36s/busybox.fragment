@@ -16,6 +16,8 @@ CONFIG_RFKILL=y
 CONFIG_PGREP=y
 CONFIG_PKILL=y
 CONFIG_FINDFS=y
+# The LightMoss updater (initramfs) re-reads the eMMC partition table.
+CONFIG_BLOCKDEV=y
 # dArkMossCommon.sh: echo MENU_TOGGLE | /usr/bin/nc -u -w1 127.0.0.1 55355
 CONFIG_NC=y
 CONFIG_NC_SERVER=y

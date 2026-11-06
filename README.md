@@ -111,8 +111,20 @@ with its own disk signature, and leaves the rest of the eMMC for the first
 boot's `SPRUCEOS` partition. A LightMoss card in TF1 still boots first, so you
 can always boot from a card to repair the eMMC.
 
-**Updating the eMMC:** flash the new image to a TF1 card, boot it, and run
-`lightmoss-install-emmc` again. On an eMMC that already holds LightMoss it
+**Updating the eMMC, Miyoo style:** rename the release's
+`lightmoss-r36s-<version>.img.xz` to `LightMoss.rkimg`, copy it to a FAT32 card
+(or to the BOOT partition of a LightMoss card), put that card in TF1, connect
+the charger and power on. U-Boot sees the file and starts the updater (a small
+initramfs, used for nothing else), which checks the image and writes it to the
+eMMC: on an eMMC that holds LightMoss it keeps the partition table,
+`SPRUCEOS`, the disk signature, the SSH host keys, the machine ID, the panel
+choice and `headphones-invert`; anything else on the eMMC (EmuELEC) gets a
+fresh install, so this also does the first install without SSH. The file is
+then renamed `LightMoss.rkimg.done` and the device restarts into the new
+system. Without the charger it says so and boots as usual.
+
+**Updating the eMMC from a LightMoss card:** flash the new image to a TF1 card,
+boot it, and run `lightmoss-install-emmc` again. On an eMMC that already holds LightMoss it
 replaces only the boot loader, BOOT and the system partition, and keeps the
 partition table, `SPRUCEOS` (and spruce on it), the SSH host keys and the
 machine ID; `--wipe` starts over instead. The base OS holds no spruce data

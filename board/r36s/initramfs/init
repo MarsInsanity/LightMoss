@@ -1,0 +1,205 @@
+#!/bin/sh
+# LightMoss updater (initramfs).
+#
+# U-Boot boots with this initramfs only when an update is waiting: a file
+# named LightMoss.rkimg on TF1's first partition (a plain FAT32 card is
+# enough) or on the system's BOOT partition (see boot.ini). It is a LightMoss
+# image, as released (.img.xz) or uncompressed (.img), renamed.
+#
+# The image goes on the internal eMMC, which nothing has mounted yet:
+#  - an eMMC that already holds LightMoss is updated: the loader, BOOT and the
+#    system partition are rewritten; the partition table, SPRUCEOS (spruce on
+#    it), the disk signature, the machine ID, the SSH host keys, the panel
+#    choice (uboot.dtb) and a headphones-invert flag stay;
+#  - anything else on the eMMC (EmuELEC) is replaced by a fresh install.
+# Only with the charger connected: a write cut short leaves no system on the
+# eMMC (a LightMoss card in TF1 still boots, and can repair it).
+#
+# Afterwards the file is renamed LightMoss.rkimg.done and the device restarts.
+# Without the charger, or when anything is wrong, it says so and boots the
+# installed system as usual.
+
+export PATH=/bin
+/bin/busybox --install -s /bin 2>/dev/null
+mkdir -p /dev /proc /sys /tmp /mnt /newroot
+mount -t devtmpfs devtmpfs /dev
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+exec </dev/console >/dev/console 2>&1
+
+RKIMG=LightMoss.rkimg
+TTY=/dev/tty1
+
+say() {
+	echo "lightmoss-update: $*"
+	printf '\033[2J\033[H\n\n  LightMoss update\n\n  %s\n' "$*" > "$TTY" 2>/dev/null
+}
+
+cmdline() { sed -n "s/.*\\b$1=\\([^ ]*\\).*/\\1/p" /proc/cmdline; }
+
+part() { case "$1" in *[0-9]) echo "/dev/${1}p$2" ;; *) echo "/dev/$1$2" ;; esac; }
+
+# MBR disk signature of a whole disk, as PARTUUID writes it (8 hex digits).
+disksig() { od -An -tx4 -j 440 -N 4 "$1" 2>/dev/null | tr -d ' \n'; }
+
+disks() {
+	for d in /sys/block/mmcblk*; do
+		n="${d##*/}"
+		case "$n" in *boot*|*rpmb*) continue ;; esac
+		[ -e "$d" ] && echo "$n"
+	done
+}
+
+disktype() { cat "/sys/block/$1/device/type" 2>/dev/null; }
+
+# busybox blkid: /dev/x: LABEL="BOOT" UUID="..."
+label() { blkid "$1" 2>/dev/null | sed -n 's/.*LABEL="\([^"]*\)".*/\1/p'; }
+
+# ---------------------------------------------------------------- root disk --
+ROOTSPEC="$(cmdline root)"
+SIG="${ROOTSPEC#PARTUUID=}"; SIG="${SIG%-*}"
+ROOTDISK=""
+n=0
+while [ -z "$ROOTDISK" ] && [ "$n" -lt 50 ]; do
+	for d in $(disks); do
+		[ "$(disksig "/dev/$d")" = "$SIG" ] && ROOTDISK="$d" && break
+	done
+	[ -n "$ROOTDISK" ] || { sleep 0.2; n=$((n + 1)); }
+done
+
+boot_system() {
+	if [ -z "$ROOTDISK" ]; then
+		say "No LightMoss system found (root=$ROOTSPEC). Power off and check the cards."
+		while :; do sleep 60; done
+	fi
+	mount -t ext4 -o ro "$(part "$ROOTDISK" 2)" /newroot || {
+		say "Cannot mount $(part "$ROOTDISK" 2)."
+		while :; do sleep 60; done
+	}
+	umount /proc /sys 2>/dev/null
+	mount --move /dev /newroot/dev
+	exec switch_root /newroot /sbin/init
+}
+
+# -------------------------------------------------------------- the update --
+update() {
+	# The eMMC: the one MMC (not SD) disk.
+	EMMC=""
+	for d in $(disks); do [ "$(disktype "$d")" = MMC ] && EMMC="$d"; done
+	[ -n "$EMMC" ] || { say "This device has no internal eMMC: nothing to update."; return 1; }
+
+	# Find the image: partition 1 of each card (TF1, where U-Boot saw it, is
+	# one of them). Never the eMMC: it is about to be overwritten.
+	IMG=""
+	mkdir -p /mnt/src
+	for d in $(disks); do
+		[ "$d" = "$EMMC" ] && continue
+		p="$(part "$d" 1)"
+		[ -b "$p" ] || continue
+		mount -o rw "$p" /mnt/src 2>/dev/null || continue
+		if [ -f "/mnt/src/$RKIMG" ]; then IMG="/mnt/src/$RKIMG"; break; fi
+		umount /mnt/src
+	done
+	[ -n "$IMG" ] || return 1
+
+	# Only on the charger.
+	online=0
+	for f in /sys/class/power_supply/*/online; do
+		[ "$(cat "$f" 2>/dev/null)" = 1 ] && online=1
+	done
+	if [ "$online" != 1 ]; then
+		say "An update is waiting ($RKIMG). Connect the charger and restart to install it. Starting without it..."
+		sleep 8
+		return 1
+	fi
+
+	# Compressed (as released) or not.
+	if [ "$(od -An -tx1 -N 6 "$IMG" | tr -d ' \n')" = fd377a585a00 ]; then
+		say "Checking $RKIMG..."
+		xz -t "$IMG" || { say "$RKIMG is damaged. Starting without it..."; sleep 8; return 1; }
+		CAT="xz -dc"
+	else
+		CAT="cat"
+	fi
+
+	# Its partition table: p1 (BOOT) and p2 (system), start and size.
+	$CAT "$IMG" | dd bs=512 count=1 of=/tmp/new.mbr 2>/dev/null
+	[ "$(od -An -tx1 -j 510 -N 2 /tmp/new.mbr | tr -d ' \n')" = 55aa ] ||
+		{ say "$RKIMG is not a LightMoss image. Starting without it..."; sleep 8; return 1; }
+	geom() { od -An -tu4 -j "$2" -N 8 "$1" | tr -s ' ' | sed 's/^ //'; }
+	NEW1="$(geom /tmp/new.mbr 454)"; NEW2="$(geom /tmp/new.mbr 470)"
+	dd if="/dev/$EMMC" bs=512 count=1 of=/tmp/old.mbr 2>/dev/null
+	OLD1="$(geom /tmp/old.mbr 454)"; OLD2="$(geom /tmp/old.mbr 470)"
+
+	E1="$(part "$EMMC" 1)"; E2="$(part "$EMMC" 2)"
+	MODE=install
+	if [ "$(label "$E1")" = BOOT ] && [ "$(label "$E2")" = LIGHTMOSS ]; then
+		[ "$NEW1" = "$OLD1" ] && [ "$NEW2" = "$OLD2" ] || {
+			say "This image lays the eMMC out differently from the installed LightMoss. Install it with lightmoss-install-emmc --wipe instead. Starting without it..."
+			sleep 12; return 1; }
+		MODE=update
+	fi
+
+	# Keep what makes the installed system this device's.
+	mkdir -p /tmp/keep /mnt/old
+	if [ "$MODE" = update ]; then
+		EMMCSIG="$(disksig "/dev/$EMMC")"
+		if mount -o ro "$E2" /mnt/old; then
+			cp -a /mnt/old/etc/machine-id /tmp/keep/ 2>/dev/null
+			[ -d /mnt/old/etc/dropbear ] && cp -a /mnt/old/etc/dropbear /tmp/keep/
+			umount /mnt/old
+		fi
+		if mount -o ro "$E1" /mnt/old; then
+			[ -e /mnt/old/headphones-invert ] && touch /tmp/keep/headphones-invert
+			# The Panel 9 swap of R36S-PANEL.txt: keep U-Boot starting on Panel 9.
+			cmp -s /mnt/old/uboot.dtb /mnt/old/uboot-panel9.dtb 2>/dev/null && touch /tmp/keep/panel9
+			umount /mnt/old
+		fi
+	fi
+
+	say "Installing LightMoss on the internal eMMC. Do not power off. This takes a few minutes."
+	$CAT "$IMG" | dd of="/dev/$EMMC" bs=1M conv=fsync 2>/tmp/dd.log ||
+		{ say "Writing the eMMC failed: $(tail -n 1 /tmp/dd.log). Boot a LightMoss card from TF1 to repair it."; while :; do sleep 60; done; }
+	if [ "$MODE" = update ]; then
+		# The eMMC's own partition table: SPRUCEOS and the disk signature.
+		dd if=/tmp/old.mbr of="/dev/$EMMC" bs=512 count=1 conv=notrunc,fsync 2>/dev/null
+	else
+		# A disk signature of its own, so it never shares a PARTUUID with a
+		# LightMoss card: four random bytes in place of the image's "LM36".
+		while :; do
+			dd if=/dev/urandom of="/dev/$EMMC" bs=1 seek=440 count=4 conv=notrunc,fsync 2>/dev/null
+			EMMCSIG="$(disksig "/dev/$EMMC")"
+			[ "$EMMCSIG" != 4c4d3336 ] && [ "$EMMCSIG" != 00000000 ] && break
+		done
+	fi
+	blockdev --rereadpt "/dev/$EMMC" 2>/dev/null
+	sleep 1
+
+	mount -o rw "$E1" /mnt/old || { say "Cannot mount the new BOOT."; while :; do sleep 60; done; }
+	sed -i "s/root=PARTUUID=[0-9a-f]*-02/root=PARTUUID=$EMMCSIG-02/" /mnt/old/boot.ini
+	[ -e /tmp/keep/headphones-invert ] && touch /mnt/old/headphones-invert
+	[ -e /tmp/keep/panel9 ] && cp /mnt/old/uboot-panel9.dtb /mnt/old/uboot.dtb
+	umount /mnt/old
+	if [ "$MODE" = update ] && mount -o rw "$E2" /mnt/old; then
+		[ -e /tmp/keep/machine-id ] && cp -a /tmp/keep/machine-id /mnt/old/etc/machine-id
+		if [ -d /tmp/keep/dropbear ]; then
+			rm -rf /mnt/old/etc/dropbear
+			cp -a /tmp/keep/dropbear /mnt/old/etc/dropbear
+		fi
+		# SPRUCEOS is already there: no first-boot partitioning.
+		mkdir -p /mnt/old/var/lib/lightmoss
+		touch /mnt/old/var/lib/lightmoss/firstboot.done
+		umount /mnt/old
+	fi
+
+	mv "$IMG" "$IMG.done"
+	umount /mnt/src 2>/dev/null
+	sync
+	say "LightMoss is installed on the eMMC ($MODE). Restarting..."
+	sleep 3
+	reboot -f
+}
+
+grep -qw lightmoss.rkimg /proc/cmdline && update
+umount /mnt/src 2>/dev/null
+boot_system
