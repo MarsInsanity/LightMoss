@@ -31,6 +31,10 @@ $(O)/.config: $(BR_DIR)/Makefile configs/$(DEFCONFIG)
 config: $(BR_DIR)/Makefile
 	$(BR_MAKE) $(DEFCONFIG)
 
+# Real files of this tree are never built from anything: keep the catch-all
+# rule below away from them.
+Makefile configs/$(DEFCONFIG): ;
+
 # Everything else goes to buildroot (menuconfig, linux-rebuild, clean, ...).
 %: $(BR_DIR)/Makefile
 	$(BR_MAKE) $@
