@@ -1,10 +1,13 @@
 #!/bin/sh
 # LightMoss updater (initramfs).
 #
-# U-Boot boots with this initramfs only when an update is waiting: a file
-# named LightMoss.rkimg on TF1's first partition (a plain FAT32 card is
-# enough) or on the system's BOOT partition (see boot.ini). It is a LightMoss
-# image, as released (.img.xz) or uncompressed (.img), renamed.
+# U-Boot boots with this initramfs only when an update is waiting (boot.ini):
+# a file named LightMoss.rkimg on TF1's first partition (a plain FAT32 card is
+# enough), or an empty file named lightmoss-install there or on the system's
+# BOOT, for an image U-Boot cannot see (too big for BOOT, on the spruce card
+# in TF2, on exFAT). LightMoss.rkimg is a LightMoss image, as released
+# (.img.xz) or uncompressed (.img), renamed; it is looked for on every
+# FAT32/exFAT partition of every card.
 #
 # The image goes on the internal eMMC, which nothing has mounted yet:
 #  - an eMMC that already holds LightMoss is updated: the loader, BOOT and the
@@ -55,6 +58,28 @@ disktype() { cat "/sys/block/$1/device/type" 2>/dev/null; }
 # busybox blkid: /dev/x: LABEL="BOOT" UUID="..."
 label() { blkid "$1" 2>/dev/null | sed -n 's/.*LABEL="\([^"]*\)".*/\1/p'; }
 
+# The empty file that asks for an update when the image itself is somewhere
+# U-Boot cannot look (a big image, the spruce card in TF2, exFAT).
+TRIGGER=lightmoss-install
+
+# A LightMoss image: xz-compressed (as released), or raw (an MBR).
+is_image() {
+	[ "$(od -An -tx1 -N 6 "$1" | tr -d ' \n')" = fd377a585a00 ] ||
+		[ "$(od -An -tx1 -j 510 -N 2 "$1" | tr -d ' \n')" = 55aa ]
+}
+
+# Remove the trigger from partition 1 of every disk, so it fires once.
+clear_trigger() {
+	mkdir -p /mnt/flag
+	for d in $(disks); do
+		p="$(part "$d" 1)"
+		[ -b "$p" ] || continue
+		mount -t vfat -o rw "$p" /mnt/flag 2>/dev/null || continue
+		rm -f "/mnt/flag/$TRIGGER"
+		umount /mnt/flag
+	done
+}
+
 # ---------------------------------------------------------------- root disk --
 ROOTSPEC="$(cmdline root)"
 SIG="${ROOTSPEC#PARTUUID=}"; SIG="${SIG%-*}"
@@ -88,19 +113,31 @@ update() {
 	for d in $(disks); do [ "$(disktype "$d")" = MMC ] && EMMC="$d"; done
 	[ -n "$EMMC" ] || { say "This device has no internal eMMC: nothing to update."; return 1; }
 
-	# Find the image: partition 1 of each card (TF1, where U-Boot saw it, is
-	# one of them). Never the eMMC: it is about to be overwritten.
+	# Find the image on any FAT32/exFAT partition of any card: a plain card in
+	# TF1, the LightMoss card's BOOT or SPRUCEOS, the spruce card in TF2. Never
+	# the eMMC: it is about to be overwritten. A file of that name that is not
+	# an image (a placeholder) is passed over.
 	IMG=""
 	mkdir -p /mnt/src
 	for d in $(disks); do
 		[ "$d" = "$EMMC" ] && continue
-		p="$(part "$d" 1)"
-		[ -b "$p" ] || continue
-		mount -o rw "$p" /mnt/src 2>/dev/null || continue
-		if [ -f "/mnt/src/$RKIMG" ]; then IMG="/mnt/src/$RKIMG"; break; fi
-		umount /mnt/src
+		for p in /dev/"$d"p*; do
+			[ -b "$p" ] || continue
+			mount -t vfat -o rw "$p" /mnt/src 2>/dev/null ||
+				mount -t exfat -o rw "$p" /mnt/src 2>/dev/null || continue
+			if [ -f "/mnt/src/$RKIMG" ] && is_image "/mnt/src/$RKIMG"; then
+				IMG="/mnt/src/$RKIMG"
+				break 2
+			fi
+			umount /mnt/src
+		done
 	done
-	[ -n "$IMG" ] || return 1
+	if [ -z "$IMG" ]; then
+		clear_trigger
+		say "No $RKIMG found on any card. Copy it to a card and try again. Starting without it..."
+		sleep 8
+		return 1
+	fi
 
 	# Only on the charger.
 	online=0
@@ -194,6 +231,7 @@ update() {
 
 	mv "$IMG" "$IMG.done"
 	umount /mnt/src 2>/dev/null
+	clear_trigger
 	sync
 	say "LightMoss is installed on the eMMC ($MODE). Restarting..."
 	sleep 3

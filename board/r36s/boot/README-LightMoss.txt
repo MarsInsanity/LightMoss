@@ -34,11 +34,21 @@ Installing or updating the eMMC without SSH
 -------------------------------------------
 Rename a LightMoss release image (lightmoss-r36s-<version>.img.xz) to
     LightMoss.rkimg
-copy it to a FAT32 card (or to this BOOT partition), put the card in TF1,
-connect the charger and switch on. The image is checked and written to the
-internal eMMC (an existing LightMoss keeps SPRUCEOS and its settings), the
-file is renamed LightMoss.rkimg.done, and the device restarts. Without the
-charger connected nothing is written.
+
+First install (EmuELEC still on the eMMC): copy LightMoss.rkimg to the spruce
+card (TF2), create an empty file named
+    lightmoss-install
+in this BOOT folder, keep this card in TF1, connect the charger, switch on.
+
+Updates (LightMoss already on the eMMC): copy LightMoss.rkimg to a FAT32 card
+in TF1, connect the charger, switch on. (With it on the spruce card in TF2
+instead, also put an empty lightmoss-install on the card in TF1.)
+
+The image is checked and written to the internal eMMC (an existing LightMoss
+keeps SPRUCEOS and its settings), LightMoss.rkimg is renamed
+LightMoss.rkimg.done, lightmoss-install is removed, and the device restarts.
+Take the LightMoss card out of TF1 to boot from the eMMC. Without the charger
+connected nothing is written.
 
 From SSH instead: boot a card with the newer LightMoss in TF1 and run
 lightmoss-install-emmc again: it replaces the system and keeps SPRUCEOS.
