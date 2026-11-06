@@ -41,6 +41,10 @@ dmesg                       > "$OUT/dmesg.log"         2>/dev/null
 
 [ -f /mnt/SDCARD/Saves/spruce/spruce.log ] && cp -f /mnt/SDCARD/Saves/spruce/spruce.log "$OUT/" 2>/dev/null
 
+# Started from a card on a device with LightMoss on its eMMC: how that is.
+/usr/libexec/lightmoss/emmc-report "$OUT"
+[ -f /boot/lightmoss-update.log ] && cp -f /boot/lightmoss-update.log "$OUT/" 2>/dev/null
+
 ls -1d "$LOGDIR"/*/ 2>/dev/null | sort | head -n "-$KEEP" | while read -r old; do
 	rm -rf "$old"
 done
