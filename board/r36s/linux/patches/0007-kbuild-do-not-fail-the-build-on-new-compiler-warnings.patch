@@ -1,0 +1,27 @@
+From: LightMoss <lightmoss@localhost>
+Subject: [PATCH] kbuild: do not fail the build on new compiler warnings
+
+The Android common kernel wraps every compile in scripts/gcc-wrapper.py,
+which turns any warning not on its allow-list into an error. The list
+dates from the GCC 4.9 days; GCC 14 warns about plenty of old code
+(-Warray-bounds in arch/arm64/kernel/setup.c, for one), so nothing
+builds. dArkOS/dArkMoss never meet it only because their build hosts
+have no "python" for the wrapper's shebang.
+---
+diff --git a/Makefile b/Makefile
+--- a/Makefile
++++ b/Makefile
+@@ -375,11 +375,8 @@
+ PYTHON		= python
+ CHECK		= sparse
+ 
+-# Use the wrapper for the compiler. This wrapper scans for new
+-# warnings and causes the build to stop upon encountering them.
+-ifneq ($(wildcard $(srctree)/scripts/gcc-wrapper.py),)
+-CC		= $(srctree)/scripts/gcc-wrapper.py $(CROSS_COMPILE)gcc
+-endif
++# LightMoss: Android's gcc-wrapper.py is not used. It fails the build on any
++# warning missing from its 2016 allow-list, which today's GCC always finds.
+ 
+ CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ \
+ 		  -Wbitwise -Wno-return-void $(CF)
