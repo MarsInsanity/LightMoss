@@ -3,9 +3,10 @@
 #
 # With the charger connected, it looks at the root of every FAT32/exFAT
 # partition of every card for a file whose name ends in .rkimg: a LightMoss
-# image, as released (.img.xz) or uncompressed (.img), renamed. The first
-# usable one is installed. Without the charger, or with no such file, the
-# system starts at once.
+# release image (.img.xz), renamed. Only compressed images are taken: xz's
+# checksum over the whole file is tested before anything is written. The
+# first usable one is installed. Without the charger, or with no such file,
+# the system starts at once.
 #
 # Where it goes, which nothing has mounted yet: the internal eMMC; or, when
 # the LightMoss Update app has left lightmoss-update on the system's BOOT, the
@@ -19,7 +20,10 @@
 # The charger is required because a write cut short leaves no system there (a
 # LightMoss card in TF1 still boots, and can repair it).
 #
-# Afterwards the file is renamed <name>.rkimg.done and the device restarts.
+# What was written is read back from the disk and compared with the image
+# (one more try if it differs; then it stops and says so rather than start a
+# damaged system). Afterwards the file is renamed <name>.rkimg.done and the
+# device restarts.
 # An image it cannot use is renamed <name>.rkimg.bad and the system starts as
 # usual. When it found something to do, what it did goes to
 # lightmoss-update.log on the BOOT partition it was started from.
@@ -91,10 +95,41 @@ label() { blkid "$1" 2>/dev/null | sed -n 's/.*LABEL="\([^"]*\)".*/\1/p'; }
 SELF_TRIGGER=lightmoss-update
 OLD_TRIGGER=lightmoss-install
 
-# A LightMoss image: xz-compressed (as released), or raw (an MBR).
+# A LightMoss image as released: xz-compressed (whose checksum xz -t tests).
 is_image() {
-	[ "$(od -An -tx1 -N 6 "$1" | tr -d ' \n')" = fd377a585a00 ] ||
-		[ "$(od -An -tx1 -j 510 -N 2 "$1" | tr -d ' \n')" = 55aa ]
+	[ "$(od -An -tx1 -N 6 "$1" | tr -d ' \n')" = fd377a585a00 ]
+}
+
+# The SHA-256 of the first $2 bytes of disk $1, read from the disk itself
+# rather than from what the page cache still holds of the write.
+readback() {
+	sync
+	blockdev --flushbufs "$1" 2>/dev/null
+	echo 3 > /proc/sys/vm/drop_caches 2>/dev/null
+	head -c "$2" "$1" | sha256sum | cut -c1-64
+}
+
+# Decompress $IMG onto the target, taking the image's SHA-256 and size on the
+# way (tee into sha256sum and wc). Sets WANT and BYTES.
+write_image() {
+	rm -f /tmp/img.sum.fifo /tmp/img.len.fifo
+	mkfifo /tmp/img.sum.fifo /tmp/img.len.fifo
+	sha256sum < /tmp/img.sum.fifo > /tmp/img.sum &
+	sumpid=$!
+	wc -c < /tmp/img.len.fifo > /tmp/img.len &
+	lenpid=$!
+	# (notrunc: a no-op on a disk, but the test harness writes into a file.)
+	xz -dc "$IMG" | tee /tmp/img.sum.fifo /tmp/img.len.fifo |
+		dd of="$(dev "$TARGET")" bs=1M conv=notrunc,fsync 2>/tmp/dd.log
+	rc=$?
+	wait "$sumpid" "$lenpid"
+	WANT="$(cut -c1-64 /tmp/img.sum)"
+	BYTES="$(tr -d ' \n' < /tmp/img.len)"
+	log "written: $(tr '\n' ' ' < /tmp/dd.log)($BYTES bytes, sha256 $WANT)"
+	[ "$rc" = 0 ] || return 1
+	# All of it: at least up to the end of the image's system partition.
+	[ -n "$BYTES" ] && [ "$BYTES" -ge "$IMGEND" ] ||
+		{ echo "the image ended after ${BYTES:-0} of $IMGEND bytes" > /tmp/dd.log; return 1; }
 }
 
 # Remove the flags from partition 1 of every disk, so they fire once.
@@ -232,7 +267,7 @@ update() {
 	# SPRUCEOS, the spruce card in TF2, but nowhere on the target that is
 	# about to be overwritten. A file of that name that is not an image (a
 	# placeholder) is passed over.
-	IMG=""
+	IMG=""; NOTIMAGE=""
 	for d in $(disks); do
 		for p in $(parts "$d"); do
 			if [ "$d" = "$TARGET" ]; then
@@ -248,11 +283,20 @@ update() {
 					log "image: $p/${f##*/}, $(wc -c < "$f") bytes"
 					break 3
 				fi
-				log "$p/${f##*/} is not an image, passed over"
+				# Not a compressed release image (an uncompressed .img, a
+				# partial copy...): set aside, once, and say so below.
+				mv "$f" "$f.bad"
+				log "$p/${f##*/} is not a compressed LightMoss image (.img.xz): set aside as .bad"
+				NOTIMAGE="${f##*/}"
 			done
 			umount /mnt/src
 		done
 	done
+	if [ -z "$IMG" ] && [ -n "$NOTIMAGE" ]; then
+		ACTIVE=1
+		give_up "$NOTIMAGE is not a compressed LightMoss release image (lightmoss-r36s-<version>.img.xz renamed .rkimg), so it was set aside as $NOTIMAGE.bad."
+		return 1
+	fi
 	if [ -z "$IMG" ]; then
 		# Nothing to install: a plain start, unless the app asked for one.
 		[ "$SELF" = 1 ] || { log "no .rkimg found"; return 0; }
@@ -262,21 +306,17 @@ update() {
 	ACTIVE=1
 	RKIMG="${IMG##*/}"
 
-	# Compressed (as released) or not.
-	if [ "$(od -An -tx1 -N 6 "$IMG" | tr -d ' \n')" = fd377a585a00 ]; then
-		say "Checking $RKIMG..."
-		xz -t "$IMG" || { give_up "$RKIMG is damaged (set aside as $RKIMG.bad)."; return 1; }
-		CAT="xz -dc"
-	else
-		CAT="cat"
-	fi
+	# xz's own checksum, over the whole file, before anything is written.
+	say "Checking $RKIMG..."
+	xz -t "$IMG" || { give_up "$RKIMG is damaged (set aside as $RKIMG.bad)."; return 1; }
 
 	# Its partition table: p1 (BOOT) and p2 (system), start and size.
-	$CAT "$IMG" | dd bs=512 count=1 of=/tmp/new.mbr 2>/dev/null
+	xz -dc "$IMG" | dd bs=512 count=1 of=/tmp/new.mbr 2>/dev/null
 	[ "$(od -An -tx1 -j 510 -N 2 /tmp/new.mbr | tr -d ' \n')" = 55aa ] ||
 		{ give_up "$RKIMG is not a LightMoss image (set aside as $RKIMG.bad)."; return 1; }
 	geom() { od -An -tu4 -j "$2" -N 8 "$1" | tr -s ' ' | sed 's/^ //'; }
 	NEW1="$(geom /tmp/new.mbr 454)"; NEW2="$(geom /tmp/new.mbr 470)"
+	IMGEND=$(( (${NEW2% *} + ${NEW2#* }) * 512 ))
 	dd if="$(dev "$TARGET")" bs=512 count=1 of=/tmp/old.mbr 2>/dev/null
 	OLD1="$(geom /tmp/old.mbr 454)"; OLD2="$(geom /tmp/old.mbr 470)"
 	log "image partitions  (start size): p1 $NEW1, p2 $NEW2"
@@ -315,11 +355,31 @@ update() {
 		fi
 	fi
 
-	say "Installing LightMoss ($RKIMG) on $NAME. Do not power off. This takes a few minutes."
-	# (notrunc: a no-op on a disk, but the test harness writes into a file.)
-	$CAT "$IMG" | dd of="$(dev "$TARGET")" bs=1M conv=notrunc,fsync 2>/tmp/dd.log ||
-		fail "Writing $NAME failed: $(tail -n 1 /tmp/dd.log). Start from a LightMoss card in TF1 to repair it."
-	log "written: $(tr '\n' ' ' < /tmp/dd.log)"
+	# Write, then read it back from the disk and compare, so that a failing
+	# card or eMMC does not go unnoticed. One more try if they differ. (Before
+	# the partition table below is put back: that changes the first sector.)
+	# Should it come to that, an update puts the target's own partition table
+	# back before stopping: SPRUCEOS stays listed and the disk keeps its own
+	# signature (the image's would clash with a LightMoss card) for a retry.
+	put_table_back() {
+		[ "$MODE" = update ] &&
+			dd if=/tmp/old.mbr of="$(dev "$TARGET")" bs=512 count=1 conv=notrunc,fsync 2>/dev/null
+	}
+	try=1
+	while :; do
+		say "Installing LightMoss ($RKIMG) on $NAME. Do not power off. This takes a few minutes."
+		write_image || { put_table_back
+			fail "Writing $NAME failed: $(tail -n 1 /tmp/dd.log). Start from a LightMoss card in TF1 to repair it."; }
+		say "Checking what was written to $NAME..."
+		GOT="$(readback "$(dev "$TARGET")" "$BYTES")"
+		log "read back: sha256 $GOT"
+		[ "$GOT" = "$WANT" ] && break
+		[ "$try" -ge 2 ] && { put_table_back
+			fail "What was written to $NAME does not read back as $RKIMG, twice: $NAME may be failing. Start from a LightMoss card in TF1 to repair it, or try another card."; }
+		log "read back differs; writing again"
+		try=$((try + 1))
+	done
+	log "written and verified"
 	if [ "$MODE" = update ]; then
 		# The target's own partition table: SPRUCEOS and the disk signature.
 		dd if=/tmp/old.mbr of="$(dev "$TARGET")" bs=512 count=1 conv=notrunc,fsync 2>/dev/null
