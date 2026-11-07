@@ -1,0 +1,18 @@
+LightMoss: boot without the 1 s autoboot delay.
+
+odroidgoa.h overrode Kconfig's CONFIG_BOOTDELAY=0 with 1, so every boot
+waited a second for a key on the serial console before running bootcmd.
+The G80CA's users have no serial console. With 0, autoboot still checks
+once for a key, without waiting.
+
+--- a/include/configs/odroidgoa.h
++++ b/include/configs/odroidgoa.h
+@@ -88,6 +88,7 @@
+ 		"booti 0x02000000 - 0x01f00000\0"
+ 
+ #undef CONFIG_BOOTDELAY
+-#define CONFIG_BOOTDELAY	1
++/* LightMoss: no 1 s wait for a key on the serial console nobody has. */
++#define CONFIG_BOOTDELAY	0
+ 
+ #endif

@@ -1,0 +1,31 @@
+From: LightMoss <lightmoss@localhost>
+Subject: [PATCH] Input: odroidgo3-joypad: no 1 s rumble at probe
+
+The probe ran the rumble for a second with msleep(1000). The driver is
+built in, so that second was spent inside the kernel's initcalls: the
+root filesystem was mounted, and userspace started, a second later on
+every boot (joypad_probe took 1.007 s on a G80CA). On the G80CA the
+"rumble" is the blue LED, so all it did was blink it at boot.
+---
+--- a/drivers/input/joystick/odroidgo3-joypad.c
++++ b/drivers/input/joystick/odroidgo3-joypad.c
+@@ -2726,14 +2726,11 @@
+ 		return error;
+ 	}
+ 
+-	/* 启动震动: 探测时振动1秒 */
+-	if (joypad->has_rumble) {
+-		joypad->level = 0xFFFF;
+-		joypad_vibrator_start(joypad);
+-		msleep(1000);
+-		joypad_vibrator_stop(joypad);
+-		joypad->level = 0;
+-	}
++	/*
++	 * LightMoss: no 1 s rumble at probe. The driver is built in, so its
++	 * msleep(1000) held up the whole kernel boot (and the root mount) by
++	 * a second, to blink the LED that stands in for the G80CA's motor.
++	 */
+ 
+ 	dev_info(dev, "%s : probe success\n", __func__);
+ 	return 0;

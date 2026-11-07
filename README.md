@@ -151,6 +151,23 @@ an empty `lightmoss-install` on the TF1 card's BOOT, charger, power on.
 Booting from the eMMC with TF1 empty works on a G80CA (LightMoss 907b979, installed
 with `LightMoss.rkimg` over EmuELEC).
 
+## Boot time
+
+What LightMoss itself spends between power-on and spruce's `runtime.sh`, and
+what was cut:
+
+- U-Boot: no autoboot delay (the odroidgoa config waited 1 s for a serial key).
+- Kernel: the joypad driver no longer rumbles (blinks the LED) for 1 s while
+  probing, which held up the root mount; `rootfstype=ext4` skips the ext3/ext2
+  attempts.
+- systemd: only the fstab and debug generators run; spruce is started as soon
+  as BOOT, the devices, the mixer and NetworkManager (spruce's startup runs
+  `nmcli`) are up, not after the whole of `multi-user.target` and an idle wait.
+
+With `lightmoss-debug`, `system.txt` starts with each stage's time since the
+kernel started (a debug boot is itself slower: it prints on the screen).
+Everything after `runtime.sh` starts is spruce's own startup.
+
 ## The BOOT partition
 
 | File | |
