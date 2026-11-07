@@ -10,11 +10,14 @@
 #
 #   board/r36s/test-updater.sh [OUTPUT_DIR]     (after a build; default: output)
 #
-# Scenarios: a fresh eMMC install over another system; an eMMC update that
-# keeps SPRUCEOS and the device's settings; an in-place update of the card the
-# system runs from, its image on that card's own SPRUCEOS; an image on the
-# partition about to be overwritten (refused); no charger (nothing written,
-# still waiting); a damaged image (set aside).
+# Each run is a start (updater_main, as on every boot) with the charger on or
+# off. Scenarios: a fresh eMMC install over another system, from any *.rkimg;
+# an eMMC update that keeps SPRUCEOS and the device's settings; an in-place
+# update of the card the system runs from (the LightMoss Update app's flag),
+# its image on that card's own SPRUCEOS; an image only on the partition about
+# to be overwritten (refused); no charger (nothing happens; the app's update
+# keeps waiting); the charger and no image (a plain start, nothing written);
+# a damaged image (set aside).
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -95,6 +98,7 @@ sleep()    { :; }
 blockdev() { :; }
 reboot()   { echo "    (reboot $*)"; }
 fail()     { say "$*"; echo "    (fail: stays)"; exit 2; }
+settle_disks() { :; }
 
 mount() {
 	_t=""; _o=rw
@@ -136,13 +140,13 @@ umount() {
 run() { # the system's disk, charger 0/1
 	ROOTDISK="$1"; ROOTSPEC="PARTUUID=$(sig "$1")-02"; CHARGER="$2"
 	: > "$LOG"; : > "$W/mounts"
-	# As the init's main: update, then the source unmounted and the log saved.
-	( update; umount /mnt/src 2>/dev/null; savelog ); RC=$?
+	# A start, as the init's main up to handing over to the system.
+	( updater_main ); RC=$?
 	sed 's/^/    | /' "$LOG"
 }
 
 # --- 1: fresh eMMC install over another system -----------------------------------
-echo "1. eMMC install over another system (image on tf1's SPRUCEOS, lightmoss-install on tf1's BOOT)"
+echo "1. eMMC install over another system (LightMoss.rkimg on tf1's SPRUCEOS, charger; an old lightmoss-install is cleared)"
 fat_put tf1 3 "$XZ" LightMoss.rkimg
 : > "$W/empty"; fat_put tf1 1 "$W/empty" lightmoss-install
 TF1_P2="$(psum tf1 2)"
@@ -153,12 +157,12 @@ check "eMMC partitions are the image's" '[ "$(mbr_start "$W/emmc.disk" 2) $(mbr_
 check "eMMC system partition is the image's" '[ "$(psum emmc 2)" = "$(dd if="$RAW" bs=512 skip="$(mbr_start "$RAW" 2)" count="$(mbr_size "$RAW" 2)" 2>/dev/null | md5sum | cut -c1-32)" ]'
 check "eMMC boot loader is the image's" '[ "$(dd if="$W/emmc.disk" bs=512 skip=64 count=32704 2>/dev/null | md5sum)" = "$(dd if="$RAW" bs=512 skip=64 count=32704 2>/dev/null | md5sum)" ]'
 check "eMMC boot.ini boots its own root" 'fat_cat emmc 1 boot.ini | grep -q "root=PARTUUID=$ES-02"'
-check "image renamed .done, trigger cleared" 'fat_has tf1 3 LightMoss.rkimg.done && ! fat_has tf1 3 LightMoss.rkimg && ! fat_has tf1 1 lightmoss-install'
+check "image renamed .done, old lightmoss-install cleared" 'fat_has tf1 3 LightMoss.rkimg.done && ! fat_has tf1 3 LightMoss.rkimg && ! fat_has tf1 1 lightmoss-install'
 check "tf1's system untouched" '[ "$(psum tf1 2)" = "$TF1_P2" ]'
 check "update log on tf1's BOOT" 'fat_cat tf1 1 lightmoss-update.log | grep -q "mode: install"'
 
 # --- 2: eMMC update keeps SPRUCEOS and the device's settings ---------------------
-echo "2. eMMC update (it now holds LightMoss, SPRUCEOS behind it)"
+echo "2. eMMC update from another name (lightmoss-r36s-v9.9.9.RKIMG; SPRUCEOS behind the eMMC's system)"
 E3=$(((($(mbr_start "$W/emmc.disk" 2) + $(mbr_size "$W/emmc.disk" 2)) + 2047) / 2048 * 2048))
 echo "$E3,,c" | sfdisk --append --no-reread --no-tell-kernel -q "$W/emmc.disk" >/dev/null
 mkfs.vfat -F 16 -n SPRUCEOS --offset "$E3" "$W/emmc.disk" $(($(mbr_size "$W/emmc.disk" 3) / 2)) >/dev/null
@@ -166,29 +170,30 @@ echo keep > "$W/keep.txt"; fat_put emmc 3 "$W/keep.txt" keep.txt
 fat_put emmc 1 "$W/empty" headphones-invert
 fat_put emmc 1 "$W/empty" lightmoss-debug
 ext_do emmc 2 'echo emmc-machine-id > etc/machine-id; mkdir -p etc/dropbear; echo key > etc/dropbear/dropbear_ed25519_host_key'
-fat_ren tf1 3 LightMoss.rkimg.done LightMoss.rkimg
-fat_put tf1 1 "$W/empty" lightmoss-install
+fat_del tf1 3 LightMoss.rkimg.done
+fat_put tf1 3 "$XZ" lightmoss-r36s-v9.9.9.RKIMG
 run tf1 1
 check "eMMC signature kept" '[ "$(sig emmc)" = "$ES" ]'
 check "eMMC SPRUCEOS kept, with its files" '[ "$(mbr_start "$W/emmc.disk" 3)" = "$E3" ] && [ "$(fat_cat emmc 3 keep.txt)" = keep ]'
 check "machine ID and SSH host key kept" 'ext_do emmc 2 "grep -qx emmc-machine-id etc/machine-id && grep -qx key etc/dropbear/dropbear_ed25519_host_key"'
 check "headphones-invert and lightmoss-debug kept" 'fat_has emmc 1 headphones-invert && fat_has emmc 1 lightmoss-debug'
 check "eMMC boot.ini boots its own root" 'fat_cat emmc 1 boot.ini | grep -q "root=PARTUUID=$ES-02"'
-check "mode was update" 'fat_cat tf1 1 lightmoss-update.log | grep -q "mode: update"'
+check "mode was update, image renamed .done" 'fat_cat tf1 1 lightmoss-update.log | grep -q "mode: update" && fat_has tf1 3 lightmoss-r36s-v9.9.9.RKIMG.done'
+fat_del tf1 3 lightmoss-r36s-v9.9.9.RKIMG.done
 
 # --- 3: in-place update of the card the system runs from -------------------------
-echo "3. in place: tf1 updates itself (lightmoss-update on its BOOT, image on its SPRUCEOS)"
-# (Its BOOT is mounted rw to clear triggers, which the mtools stand-in
+echo "3. in place: tf1 updates itself (the app's lightmoss-update on its BOOT, image on its SPRUCEOS)"
+# (Its BOOT is mounted rw to clear flags, which the mtools stand-in
 # rewrites: compare what an update would change instead.)
 EMMC_MBR="$(dd if="$W/emmc.disk" bs=512 count=1 2>/dev/null | md5sum)"; EMMC_P2="$(psum emmc 2)"
-fat_ren tf1 3 LightMoss.rkimg.done LightMoss.rkimg
+fat_put tf1 3 "$XZ" LightMoss.rkimg
 fat_put tf1 1 "$W/empty" lightmoss-update
 fat_put tf1 1 "$W/empty" lightmoss-debug
 run tf1 1
 check "tf1 signature kept (4c4d3336)" '[ "$(sig tf1)" = 4c4d3336 ]'
 check "tf1 SPRUCEOS kept, image renamed .done" '[ "$(mbr_start "$W/tf1.disk" 3)" = "$S3" ] && fat_has tf1 3 LightMoss.rkimg.done'
 check "tf1 machine ID kept" 'ext_do tf1 2 "grep -qx tf1-machine-id etc/machine-id"'
-check "trigger cleared, lightmoss-debug kept" '! fat_has tf1 1 lightmoss-update && fat_has tf1 1 lightmoss-debug'
+check "flag cleared, lightmoss-debug kept" '! fat_has tf1 1 lightmoss-update && fat_has tf1 1 lightmoss-debug'
 check "tf1 boot.ini boots its own root" 'fat_cat tf1 1 boot.ini | grep -q "root=PARTUUID=4c4d3336-02"'
 check "the eMMC untouched (partition table, signature, system)" '[ "$(dd if="$W/emmc.disk" bs=512 count=1 2>/dev/null | md5sum)" = "$EMMC_MBR" ] && [ "$(psum emmc 2)" = "$EMMC_P2" ]'
 check "target was tf1, mode update" 'fat_cat tf1 1 lightmoss-update.log | grep -q "target: tf1" && fat_cat tf1 1 lightmoss-update.log | grep -q "mode: update"'
@@ -201,27 +206,37 @@ fat_put tf1 1 "$W/fake" LightMoss.rkimg
 fat_put tf1 1 "$W/empty" lightmoss-update
 P2_SUM="$(psum tf1 2)"
 run tf1 1
-check "not found there, nothing written" 'grep -q "No LightMoss.rkimg found" "$LOG" && [ "$(psum tf1 2)" = "$P2_SUM" ] && ! grep -q "written:" "$LOG"'
-check "trigger cleared" '! fat_has tf1 1 lightmoss-update'
-fat_del tf1 1 LightMoss.rkimg; fat_del tf1 1 LightMoss.rkimg.bad
+check "not taken from there, nothing written" 'grep -q "no longer on any card" "$LOG" && [ "$(psum tf1 2)" = "$P2_SUM" ] && ! grep -q "written:" "$LOG"'
+check "flag cleared" '! fat_has tf1 1 lightmoss-update'
+fat_del tf1 1 LightMoss.rkimg
 
 # --- 5: no charger -----------------------------------------------------------------
-echo "5. in place without the charger: nothing written, still waiting"
+echo "5. no charger: an image waits, nothing happens; the app's update gets a reminder"
 fat_put tf1 3 "$XZ" LightMoss.rkimg
-fat_put tf1 1 "$W/empty" lightmoss-update
-P2_SUM="$(psum tf1 2)"
+fat_del tf1 1 lightmoss-update.log
+EMMC_P2="$(psum emmc 2)"; P2_SUM="$(psum tf1 2)"
 run tf1 0
-check "nothing written" '[ "$(psum tf1 2)" = "$P2_SUM" ] && ! grep -q "written:" "$LOG"'
-check "image and trigger still there" 'fat_has tf1 3 LightMoss.rkimg && fat_has tf1 1 lightmoss-update'
+check "nothing written, no log on BOOT" '[ "$(psum emmc 2)" = "$EMMC_P2" ] && [ "$(psum tf1 2)" = "$P2_SUM" ] && ! fat_has tf1 1 lightmoss-update.log'
+check "image still there" 'fat_has tf1 3 LightMoss.rkimg'
+fat_put tf1 1 "$W/empty" lightmoss-update
+run tf1 0
+check "app's update: reminder, still waiting" 'grep -q "update is waiting" "$LOG" && fat_has tf1 1 lightmoss-update && fat_has tf1 3 LightMoss.rkimg && [ "$(psum tf1 2)" = "$P2_SUM" ]'
+fat_del tf1 1 lightmoss-update
 
-# --- 6: a damaged image ------------------------------------------------------------
-echo "6. in place, a damaged image: set aside"
-head -c 20000000 "$XZ" > "$W/damaged.xz"
+# --- 6: the charger, no image ------------------------------------------------------
+echo "6. the charger and no image: a plain start"
 fat_del tf1 3 LightMoss.rkimg
-fat_put tf1 3 "$W/damaged.xz" LightMoss.rkimg
+EMMC_P2="$(psum emmc 2)"
 run tf1 1
-check "nothing written" '[ "$(psum tf1 2)" = "$P2_SUM" ] && ! grep -q "written:" "$LOG"'
-check "set aside as .bad, trigger cleared" 'fat_has tf1 3 LightMoss.rkimg.bad && ! fat_has tf1 3 LightMoss.rkimg && ! fat_has tf1 1 lightmoss-update'
+check "nothing written, no log on BOOT" '[ "$(psum emmc 2)" = "$EMMC_P2" ] && [ "$(psum tf1 2)" = "$P2_SUM" ] && ! fat_has tf1 1 lightmoss-update.log'
+
+# --- 7: a damaged image ------------------------------------------------------------
+echo "7. a damaged image (charger): set aside"
+head -c 20000000 "$XZ" > "$W/damaged.xz"
+fat_put tf1 3 "$W/damaged.xz" broken.rkimg
+run tf1 1
+check "nothing written" '[ "$(psum emmc 2)" = "$EMMC_P2" ] && ! grep -q "written:" "$LOG"'
+check "set aside as .bad" 'fat_has tf1 3 broken.rkimg.bad && ! fat_has tf1 3 broken.rkimg'
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "All checks passed."; else echo "$FAILS check(s) FAILED."; fi

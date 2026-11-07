@@ -1,0 +1,19 @@
+{
+  "about": "What LightMoss's daily maintenance run has reviewed: newer commits and releases are reviewed next time. Updated with the run's own commits.",
+  "spruceUI/spruceOS": {
+    "branch": "Development",
+    "commit": "84dff9a5c3cd11082e4558a46b34212fab3445a9",
+    "latest_release": "v4.5.6"
+  },
+  "spruceUI/spruceOSNightlies": {
+    "latest_release": "v4.5.7-20261104.2"
+  },
+  "spruceUI/dArkMoss": {
+    "branch": "spruce",
+    "commit": "d9b12b0b322fcd7467b1bfe4f11b6bff818154fb"
+  },
+  "lcdyk0517/arkos.bsp.4.4": {
+    "branch": "rg351",
+    "commit": "923a6105701d03fbaa597273a42a49f6434cc4da"
+  }
+}
