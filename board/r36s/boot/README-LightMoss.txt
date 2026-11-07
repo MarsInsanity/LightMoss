@@ -48,38 +48,32 @@ It needs WiFi, and the charger connected when the device restarts to install.
 
 Installing or updating the eMMC without SSH
 -------------------------------------------
-Rename a LightMoss release image (lightmoss-r36s-<version>.img.xz) to
-    LightMoss.rkimg
+Put a LightMoss release image (lightmoss-r36s-<version>.img.xz) on any card,
+FAT32 or exFAT (the spruce card will do), renamed so that its name ends in
+    .rkimg
+for example LightMoss.rkimg. Connect the charger and switch on. That is all.
 
-First install (EmuELEC still on the eMMC): copy LightMoss.rkimg to the spruce
-card (TF2), create an empty file named
-    lightmoss-install
-in this BOOT folder, keep this card in TF1, connect the charger, switch on.
-
-Updates (LightMoss already on the eMMC): copy LightMoss.rkimg to a FAT32 card
-in TF1, connect the charger, switch on. (With it on the spruce card in TF2
-instead, also put an empty lightmoss-install on the card in TF1.)
-
-The image is checked and written to the internal eMMC (an existing LightMoss
-keeps SPRUCEOS and its settings), LightMoss.rkimg is renamed
-LightMoss.rkimg.done, lightmoss-install is removed, and the device restarts.
+At every start with the charger connected, LightMoss looks for such a file
+and writes it to the internal eMMC: a LightMoss already there keeps SPRUCEOS
+and its settings; anything else (EmuELEC) is replaced. The file is then
+renamed <name>.rkimg.done and the device restarts. Take this card out of TF1
+to boot from the eMMC. Without the charger nothing happens; a file that is
+not a usable image is renamed <name>.rkimg.bad.
 
 If the eMMC shows a "no SD card" screen and powers off when TF1 is empty, it
-holds an older LightMoss: update it the same way as a first install (this
-card in TF1, LightMoss.rkimg on the spruce card, lightmoss-install here).
+holds an older LightMoss: start this card in TF1, with an .rkimg on a card
+and the charger connected.
+
+From SSH instead: boot a card with the newer LightMoss in TF1 and run
+lightmoss-install-emmc again: it replaces the system and keeps SPRUCEOS.
 
 If the eMMC does not start
 --------------------------
-1. Create an empty "lightmoss-debug" here as well as "lightmoss-install", and
-   install as above. The eMMC then also starts with lightmoss-debug: its
-   kernel prints on the screen (a photo of where it stops helps).
+1. Create an empty "lightmoss-debug" here and install as above. The eMMC
+   then also starts with lightmoss-debug: its kernel prints on the screen (a
+   photo of where it stops helps).
 2. Take this card out, try starting from the eMMC, power off.
 3. Put this card back in TF1 and start. Its logs (logs/<newest> here) then
    include emmc.txt: the eMMC's boot loader against this card's, its
    partitions, how far U-Boot got with it, and its own last boot's journal
    (emmc-last-boot.log). lightmoss-update.log here says what the update did.
-Take the LightMoss card out of TF1 to boot from the eMMC. Without the charger
-connected nothing is written.
-
-From SSH instead: boot a card with the newer LightMoss in TF1 and run
-lightmoss-install-emmc again: it replaces the system and keeps SPRUCEOS.

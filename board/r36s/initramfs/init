@@ -1,31 +1,28 @@
 #!/bin/sh
-# LightMoss updater (initramfs).
+# LightMoss updater (initramfs), on every start: boot.ini always loads it.
 #
-# U-Boot boots with this initramfs only when an update is waiting (boot.ini):
-# a file named LightMoss.rkimg on TF1's first partition (a plain FAT32 card is
-# enough), or an empty lightmoss-install there or on the system's BOOT (for an
-# image U-Boot cannot see: too big for BOOT, on the spruce card in TF2, on
-# exFAT), or an empty lightmoss-update on the system's BOOT (the LightMoss
-# Update app). LightMoss.rkimg is a LightMoss image, as released (.img.xz) or
-# uncompressed (.img), renamed; it is looked for on every FAT32/exFAT
-# partition of every card, but never where it is about to be written.
+# With the charger connected, it looks at the root of every FAT32/exFAT
+# partition of every card for a file whose name ends in .rkimg: a LightMoss
+# image, as released (.img.xz) or uncompressed (.img), renamed. The first
+# usable one is installed. Without the charger, or with no such file, the
+# system starts at once.
 #
-# Where it goes, which nothing has mounted yet: with lightmoss-update, the
-# disk the system runs from (the eMMC or the card in TF1), updated in place;
-# otherwise the internal eMMC:
+# Where it goes, which nothing has mounted yet: the internal eMMC; or, when
+# the LightMoss Update app has left lightmoss-update on the system's BOOT, the
+# disk the system runs from (the eMMC or the card in TF1), in place. Never
+# from a partition about to be overwritten.
 #  - a disk that already holds LightMoss is updated: the loader, BOOT and the
 #    system partition are rewritten; the partition table, SPRUCEOS (spruce on
 #    it), the disk signature, the machine ID, the SSH host keys, the panel
 #    choice (uboot.dtb), headphones-invert and lightmoss-debug stay;
 #  - anything else on the eMMC (EmuELEC) is replaced by a fresh install.
-# Only with the charger connected: a write cut short leaves no system there
-# (a LightMoss card in TF1 still boots, and can repair it).
+# The charger is required because a write cut short leaves no system there (a
+# LightMoss card in TF1 still boots, and can repair it).
 #
-# Afterwards the file is renamed LightMoss.rkimg.done and the device restarts.
-# Without the charger it says so, boots as usual and tries again next time;
-# with an image it cannot use, it sets it aside (LightMoss.rkimg.bad) and
-# boots as usual. Either way, what it did goes to lightmoss-update.log on the
-# BOOT partition it was started from.
+# Afterwards the file is renamed <name>.rkimg.done and the device restarts.
+# An image it cannot use is renamed <name>.rkimg.bad and the system starts as
+# usual. When it found something to do, what it did goes to
+# lightmoss-update.log on the BOOT partition it was started from.
 
 # LM_UPDATER_TEST=1: only define the functions (board/r36s/test-updater.sh
 # sources this file and runs update() against disk images).
@@ -39,7 +36,6 @@ if [ -z "$LM_UPDATER_TEST" ]; then
 	exec </dev/console >/dev/console 2>&1
 fi
 
-RKIMG=LightMoss.rkimg
 TTY=/dev/tty1
 
 LOG=/tmp/update.log
@@ -89,15 +85,11 @@ charger_online() {
 # busybox blkid: /dev/x: LABEL="BOOT" UUID="..."
 label() { blkid "$1" 2>/dev/null | sed -n 's/.*LABEL="\([^"]*\)".*/\1/p'; }
 
-# The empty files that ask for an update, read by boot.ini too:
-#  - lightmoss-install (TF1's first partition, or the system's BOOT): the image
-#    goes on the internal eMMC, for an image U-Boot cannot see itself (too big
-#    for BOOT, on the spruce card in TF2, on exFAT);
-#  - lightmoss-update (the system's BOOT; the LightMoss Update app sets it):
-#    the disk the system runs from, the eMMC or the card in TF1, is updated in
-#    place.
-TRIGGER=lightmoss-install
+# Left on the system's BOOT by the LightMoss Update app: install on the disk
+# the system runs from, not on the eMMC. (lightmoss-install, which earlier
+# LightMoss needed next to an image, is only cleared away now.)
 SELF_TRIGGER=lightmoss-update
+OLD_TRIGGER=lightmoss-install
 
 # A LightMoss image: xz-compressed (as released), or raw (an MBR).
 is_image() {
@@ -105,21 +97,21 @@ is_image() {
 		[ "$(od -An -tx1 -j 510 -N 2 "$1" | tr -d ' \n')" = 55aa ]
 }
 
-# Remove the triggers from partition 1 of every disk, so they fire once.
+# Remove the flags from partition 1 of every disk, so they fire once.
 clear_trigger() {
 	mkdir -p /mnt/flag
 	for d in $(disks); do
 		p="$(part "$d" 1)"
 		parts "$d" | grep -qx "$p" || continue
 		mount -t vfat -o rw "$p" /mnt/flag 2>/dev/null || continue
-		rm -f "/mnt/flag/$TRIGGER" "/mnt/flag/$SELF_TRIGGER"
+		rm -f "/mnt/flag/$SELF_TRIGGER" "/mnt/flag/$OLD_TRIGGER"
 		umount /mnt/flag
 	done
 }
 
 # An update that cannot go ahead with this image at all: say why, set the
-# image aside (LightMoss.rkimg.bad) and clear the triggers, so the next start
-# is a plain one rather than the same error again.
+# image aside (<name>.rkimg.bad) and clear the flags, so the next start is a
+# plain one rather than the same error again.
 give_up() {
 	say "$1 Starting without it..."
 	[ -n "$IMG" ] && mv "$IMG" "$IMG.bad" 2>/dev/null
@@ -135,7 +127,7 @@ if [ -z "$LM_UPDATER_TEST" ]; then
 	SIG="${ROOTSPEC#PARTUUID=}"; SIG="${SIG%-*}"
 	ROOTDISK=""
 	n=0
-	while [ -z "$ROOTDISK" ] && [ "$n" -lt 50 ]; do
+	while [ -z "$ROOTDISK" ] && [ "$n" -lt 150 ]; do
 		for d in $(disks); do
 			[ "$(disksig "$(dev "$d")")" = "$SIG" ] && ROOTDISK="$d" && break
 		done
@@ -166,7 +158,9 @@ boot_system() {
 		say "No LightMoss system found (root=$ROOTSPEC). Power off and check the cards."
 		while :; do sleep 60; done
 	fi
-	mount -t ext4 -o ro "$(part "$ROOTDISK" 2)" /newroot || {
+	# rw, as the kernel mounts it without this initramfs (root=... rw): the
+	# boot that follows is the same.
+	mount -t ext4 -o rw "$(part "$ROOTDISK" 2)" /newroot || {
 		say "Cannot mount $(part "$ROOTDISK" 2)."
 		while :; do sleep 60; done
 	}
@@ -176,6 +170,22 @@ boot_system() {
 }
 
 # -------------------------------------------------------------- the update --
+# The cards, once the list has stopped changing (a card can still be coming up
+# when this starts), up to 3 s.
+settle_disks() {
+	prev=""; same=0; n=0
+	while [ "$n" -lt 15 ]; do
+		cur="$(disks | tr '\n' ' ')"
+		if [ "$cur" = "$prev" ]; then
+			same=$((same + 1))
+			[ "$same" -ge 2 ] && return 0
+		else
+			same=0; prev="$cur"
+		fi
+		sleep 0.2; n=$((n + 1))
+	done
+}
+
 update() {
 	mkdir -p /mnt/src /mnt/old /tmp/keep
 	# The eMMC: the one MMC (not SD) disk.
@@ -186,21 +196,24 @@ update() {
 	log "system disk: ${ROOTDISK:-none} ($ROOTSPEC), eMMC: ${EMMC:-none}"
 	for d in $(disks); do log "disk $d: $(disktype "$d"), signature $(disksig "$(dev "$d")")"; done
 
-	# The system's BOOT says which disk: lightmoss-update there means the
-	# system's own; otherwise the eMMC. lightmoss-debug there carries over
-	# to the updated disk, so it starts with kernel text on the screen and
-	# exports its own logs. (rw: the image may be on that same partition.)
+	# The system's BOOT says which disk: lightmoss-update there (the app)
+	# means the system's own; otherwise the eMMC. lightmoss-debug there carries
+	# over to the updated disk, so it starts with kernel text on the screen and
+	# exports its own logs. (rw: an image may be on that same partition.)
 	SELF=0; DEBUG=0
 	if [ -n "$ROOTDISK" ] && mount -t vfat -o rw "$(part "$ROOTDISK" 1)" /mnt/old 2>/dev/null; then
 		[ -e "/mnt/old/$SELF_TRIGGER" ] && SELF=1
 		[ -e /mnt/old/lightmoss-debug ] && DEBUG=1
 		umount /mnt/old
 	fi
+	[ "$SELF" = 1 ] && ACTIVE=1
 	if [ "$SELF" = 1 ]; then
 		TARGET="$ROOTDISK"
-	else
-		[ -n "$EMMC" ] || { IMG=""; give_up "This device has no internal eMMC: nothing to install."; return 1; }
+	elif [ -n "$EMMC" ]; then
 		TARGET="$EMMC"
+	else
+		log "no internal eMMC and no lightmoss-update: nothing to install to"
+		return 0
 	fi
 	if [ "$(disktype "$TARGET")" = MMC ]; then NAME="the internal eMMC"; else NAME="the card in TF1"; fi
 	T1="$(part "$TARGET" 1)"; T2="$(part "$TARGET" 2)"
@@ -214,10 +227,11 @@ update() {
 		TEND=$(($(pstart "$TARGET" "$T2") + $(psize "$TARGET" "$T2")))
 	fi
 
-	# Find the image on any FAT32/exFAT partition of any card: a plain card in
-	# TF1, the LightMoss card's BOOT or SPRUCEOS, the spruce card in TF2, but
-	# nowhere on the target that is about to be overwritten. A file of that
-	# name that is not an image (a placeholder) is passed over.
+	# Look for *.rkimg (any case) at the root of every FAT32/exFAT partition
+	# of every card: a plain card in TF1, the LightMoss card's BOOT or
+	# SPRUCEOS, the spruce card in TF2, but nowhere on the target that is
+	# about to be overwritten. A file of that name that is not an image (a
+	# placeholder) is passed over.
 	IMG=""
 	for d in $(disks); do
 		for p in $(parts "$d"); do
@@ -227,26 +241,26 @@ update() {
 			fi
 			mount -t vfat -o rw "$p" /mnt/src 2>/dev/null ||
 				mount -t exfat -o rw "$p" /mnt/src 2>/dev/null || continue
-			if [ -f "/mnt/src/$RKIMG" ] && is_image "/mnt/src/$RKIMG"; then
-				IMG="/mnt/src/$RKIMG"
-				log "image: $p/$RKIMG, $(wc -c < "$IMG") bytes"
-				break 2
-			fi
-			[ -e "/mnt/src/$RKIMG" ] && log "$p/$RKIMG is not an image, passed over"
+			for f in /mnt/src/*.[rR][kK][iI][mM][gG]; do
+				[ -f "$f" ] || continue
+				if is_image "$f"; then
+					IMG="$f"
+					log "image: $p/${f##*/}, $(wc -c < "$f") bytes"
+					break 3
+				fi
+				log "$p/${f##*/} is not an image, passed over"
+			done
 			umount /mnt/src
 		done
 	done
 	if [ -z "$IMG" ]; then
-		give_up "No $RKIMG found on any card. Copy it to a card and try again."
+		# Nothing to install: a plain start, unless the app asked for one.
+		[ "$SELF" = 1 ] || { log "no .rkimg found"; return 0; }
+		give_up "The LightMoss update (an .rkimg file) is no longer on any card."
 		return 1
 	fi
-
-	# Only on the charger. The update stays waiting for the next start.
-	if ! charger_online; then
-		say "An update is waiting ($RKIMG). Connect the charger and restart to install it. Starting without it..."
-		sleep 8
-		return 1
-	fi
+	ACTIVE=1
+	RKIMG="${IMG##*/}"
 
 	# Compressed (as released) or not.
 	if [ "$(od -An -tx1 -N 6 "$IMG" | tr -d ' \n')" = fd377a585a00 ]; then
@@ -301,7 +315,7 @@ update() {
 		fi
 	fi
 
-	say "Installing LightMoss on $NAME. Do not power off. This takes a few minutes."
+	say "Installing LightMoss ($RKIMG) on $NAME. Do not power off. This takes a few minutes."
 	# (notrunc: a no-op on a disk, but the test harness writes into a file.)
 	$CAT "$IMG" | dd of="$(dev "$TARGET")" bs=1M conv=notrunc,fsync 2>/tmp/dd.log ||
 		fail "Writing $NAME failed: $(tail -n 1 /tmp/dd.log). Start from a LightMoss card in TF1 to repair it."
@@ -349,10 +363,35 @@ update() {
 	reboot -f
 }
 
-[ -n "$LM_UPDATER_TEST" ] && return 0
-if grep -qw lightmoss.rkimg /proc/cmdline; then
-	update
+# Every start: with the charger, look for an update and install it; without,
+# start at once, with a reminder if the LightMoss Update app has one waiting.
+check_for_update() {
+	mkdir -p /mnt/src /mnt/old
+	if charger_online; then
+		settle_disks
+		update
+		return
+	fi
+	if [ -n "$ROOTDISK" ] && mount -t vfat -o ro "$(part "$ROOTDISK" 1)" /mnt/old 2>/dev/null; then
+		waiting=0
+		[ -e "/mnt/old/$SELF_TRIGGER" ] && waiting=1
+		umount /mnt/old
+		if [ "$waiting" = 1 ]; then
+			say "A LightMoss update is waiting. Connect the charger and restart to install it. Starting without it..."
+			sleep 5
+		fi
+	fi
+}
+
+# What a start does before handing over to the system. The log goes to BOOT
+# only when there was something to do.
+updater_main() {
+	ACTIVE=0
+	check_for_update
 	umount /mnt/src 2>/dev/null
-	savelog
-fi
+	[ "$ACTIVE" = 1 ] && savelog
+}
+
+[ -n "$LM_UPDATER_TEST" ] && return 0
+updater_main
 boot_system

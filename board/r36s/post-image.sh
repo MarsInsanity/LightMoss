@@ -14,8 +14,8 @@ PYTHON="${HOST_DIR}/bin/python3"
 [ -x "$PYTHON" ] || PYTHON=python3
 "$PYTHON" "${BOARD_DIR}/make-charge-images.py" "${BINARIES_DIR}/boot"
 
-# The updater's initramfs (uInitrd), which boot.ini loads only when TF1 holds a
-# LightMoss.rkimg: the image's own busybox and xz, with their libraries.
+# The updater's initramfs (uInitrd), which boot.ini loads on every start: the
+# image's own busybox and xz, with their libraries.
 IRD="${BUILD_DIR}/lightmoss-initramfs"
 rm -rf "${IRD:?}"
 mkdir -p "$IRD/bin" "$IRD/lib"

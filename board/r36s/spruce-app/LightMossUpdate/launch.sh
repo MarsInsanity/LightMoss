@@ -8,9 +8,10 @@
 #
 # It downloads the release's image to the root of the spruce card as
 # LightMoss.rkimg, checks it against the release's .sha256, leaves an empty
-# lightmoss-update on LightMoss's BOOT and restarts. boot.ini then starts
-# LightMoss's updater (initramfs), which writes the image in place, with the
-# charger connected only, and restarts again into the new LightMoss.
+# lightmoss-update on LightMoss's BOOT (so the image goes on the disk the
+# system runs from, not on the eMMC) and restarts. LightMoss's updater, the
+# initramfs every start goes through, writes it in place, with the charger
+# connected only, and restarts again into the new LightMoss.
 
 . /mnt/SDCARD/spruce/scripts/helperFunctions.sh
 . /usr/libexec/lightmoss/lib.sh

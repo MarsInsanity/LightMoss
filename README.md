@@ -120,28 +120,23 @@ with its own disk signature, and leaves the rest of the eMMC for the first
 boot's `SPRUCEOS` partition. A LightMoss card in TF1 still boots first, so you
 can always boot from a card to repair the eMMC.
 
-**Installing or updating the eMMC, Miyoo style (no SSH):** rename the
-release's `lightmoss-r36s-<version>.img.xz` to `LightMoss.rkimg`.
+**Installing or updating the eMMC, Miyoo style (no SSH):** put a release's
+`lightmoss-r36s-<version>.img.xz` on any card, FAT32 or exFAT (the spruce card
+will do), renamed so that its name ends in `.rkimg` (`LightMoss.rkimg`, say),
+connect the charger and power on. That is all, for the first install over
+EmuELEC (from a LightMoss card in TF1) as for updates (from the eMMC itself).
 
-- *First install* (EmuELEC still on the eMMC, so its boot loader does not know
-  about any of this): flash LightMoss to the TF1 card as usual, copy
-  `LightMoss.rkimg` to the spruce card (TF2), create an empty file named
-  `lightmoss-install` on the TF1 card's BOOT partition, connect the charger and
-  power on.
-- *Updates* (LightMoss on the eMMC): copy `LightMoss.rkimg` to a FAT32 card in
-  TF1 (a spare card, or the spruce card if it is FAT32 and in TF1), connect the
-  charger and power on. With the spruce card in TF2, put `LightMoss.rkimg` on it
-  and an empty `lightmoss-install` on any FAT32 card in TF1.
-
-U-Boot sees the file and starts the updater (a small initramfs, used for nothing
-else), which finds `LightMoss.rkimg` on any card, checks it and writes it to the
-eMMC: on an eMMC that holds LightMoss it keeps the partition table,
-`SPRUCEOS`, the disk signature, the SSH host keys, the machine ID, the panel
-choice and `headphones-invert`; anything else on the eMMC (EmuELEC) gets a
-fresh install, so this also does the first install without SSH. The file is
-then renamed `LightMoss.rkimg.done`, `lightmoss-install` is removed, and the
-device restarts. Take the TF1 card out (or put the spruce card there) to boot
-the eMMC. Without the charger it says so and boots as usual.
+The updater (a small initramfs that every start goes through) looks, when the
+charger is connected, at the root of every FAT32/exFAT partition of every card
+for `*.rkimg`, checks the first usable one and writes it to the eMMC: on an
+eMMC that holds LightMoss it keeps the partition table, `SPRUCEOS`, the disk
+signature, the SSH host keys, the machine ID, the panel choice,
+`headphones-invert` and `lightmoss-debug`; anything else on the eMMC (EmuELEC)
+gets a fresh install. The file is then renamed `<name>.rkimg.done` and the
+device restarts; take the TF1 card out (or put the spruce card there) to boot
+the eMMC. Without the charger nothing happens. A file that is not a usable
+image is renamed `<name>.rkimg.bad`; an image is never read from a partition it
+is about to overwrite.
 
 **Updating the eMMC from a LightMoss card:** flash the new image to a TF1 card,
 boot it, and run `lightmoss-install-emmc` again. On an eMMC that already holds LightMoss it
@@ -153,12 +148,11 @@ nothing else is lost.
 
 **An eMMC that shows U-Boot's "no SD card" screen and powers off with TF1
 empty** holds an older LightMoss, whose U-Boot muxed the eMMC's pins away for
-SPI flash and buttons the G80CA does not have. Update it as for a first install:
-current LightMoss on the TF1 card, `LightMoss.rkimg` on the spruce card in TF2,
-an empty `lightmoss-install` on the TF1 card's BOOT, charger, power on.
+SPI flash and buttons the G80CA does not have. Update it from a current
+LightMoss card in TF1: an `.rkimg` on a card, the charger, power on.
 
 Booting from the eMMC with TF1 empty works on a G80CA (LightMoss 907b979, installed
-with `LightMoss.rkimg` over EmuELEC).
+from an `.rkimg` over EmuELEC).
 
 ### Updates over WiFi: the LightMoss Update app
 
@@ -168,7 +162,8 @@ that matches the installed LightMoss. With WiFi on, it looks at the newest
 release on GitHub (the repository in `LIGHTMOSS_REPO` of `/etc/os-release`),
 and if it is not the installed version, downloads its image to the root of the
 spruce card as `LightMoss.rkimg`, checks it against the release's `.sha256`
-(fetched over a verified connection), sets `lightmoss-update` on BOOT and
+(fetched over a verified connection), sets `lightmoss-update` on BOOT (which
+points the updater at the running system's own disk rather than the eMMC) and
 restarts. The updater then rewrites **the disk LightMoss runs from**, the eMMC
 or the TF1 card, in place: the boot loader, BOOT and the system partition, as
 above, keeping SPRUCEOS, spruce and the settings. Only with the charger
@@ -184,6 +179,10 @@ what was cut:
 - Kernel: the joypad driver no longer rumbles (blinks the LED) for 1 s while
   probing, which held up the root mount; `rootfstype=ext4` skips the ext3/ext2
   attempts.
+- The updater's initramfs comes along on every start (so that an `.rkimg` on
+  any card is enough). Without the charger it only finds the system's disk
+  and hands over to it, a fraction of a second; with the charger it also looks
+  through the cards.
 - systemd: only the fstab and debug generators run; spruce is started as soon
   as BOOT, the devices, the mixer and NetworkManager (spruce's startup runs
   `nmcli`) are up, not after the whole of `multi-user.target` and an idle wait.
