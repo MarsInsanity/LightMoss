@@ -21,6 +21,8 @@ Environment=HOME=/root
 # save_poweroff.sh too, before it reaches the poweroff.
 KillMode=process
 ExecStartPre=/usr/libexec/lightmoss/mount-spruce
+# The LightMoss Update app onto the card; never in the way of the frontend.
+ExecStartPre=-/usr/libexec/lightmoss/spruce-app
 # Cosmetic, so a failure must not stop the frontend (the leading dash).
 ExecStartPre=-/usr/libexec/lightmoss/console-blank
 # runtime.sh is spruce's own entry point. SIGHUP is ignored before the exec and

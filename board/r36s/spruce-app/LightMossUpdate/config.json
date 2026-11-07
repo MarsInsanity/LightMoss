@@ -1,0 +1,6 @@
+{
+  "label": "LightMoss Update",
+  "icon": "icon.png",
+  "launch": "launch.sh",
+  "description": "Install the newest LightMoss release from GitHub"
+}

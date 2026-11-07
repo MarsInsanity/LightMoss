@@ -1,0 +1,28 @@
+#!/bin/sh
+# Before spruce starts: put the LightMoss Update app on the spruce card
+# (App/LightMossUpdate), or bring it up to date. LightMoss ships it, so the
+# card always has the one that knows how this LightMoss updates. Files are
+# only written when they differ. Also removes the image a finished update
+# left at the root of the card (LightMoss.rkimg.done, 50 MB or so).
+SRC=/usr/share/lightmoss/spruce-app/LightMossUpdate
+APPS=/mnt/SDCARD/App
+DST="$APPS/LightMossUpdate"
+
+mountpoint -q /mnt/SDCARD || exit 0
+[ -d "$APPS" ] || exit 0
+
+changed=0
+mkdir -p "$DST" || exit 0
+for f in "$SRC"/*; do
+	n="${f##*/}"
+	cmp -s "$f" "$DST/$n" && continue
+	cp -f "$f" "$DST/$n" && changed=1
+done
+
+if [ -f /mnt/SDCARD/LightMoss.rkimg.done ]; then
+	rm -f /mnt/SDCARD/LightMoss.rkimg.done
+	changed=1
+fi
+
+[ "$changed" = 1 ] && sync
+exit 0

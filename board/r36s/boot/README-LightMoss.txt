@@ -20,10 +20,10 @@ Delete the file to go back to a quiet boot.
 Blue LED test
 -------------
 The blue LED should be off, lit only while spruce "vibrates" (the Game
-Switcher, for example). If it stays on, create an empty file named
+Switcher, for example). If it does something else, create an empty file named
 "lightmoss-ledtest" in this folder and boot: before spruce starts, the screen
 counts through 7 numbered steps, each trying the LED's pins another way. Note
-the step numbers at which the LED is off. The file deletes itself (the test
+the step numbers at which the LED is on. The file deletes itself (the test
 runs once) and the details go to lightmoss-ledtest.txt here.
 
 SSH
@@ -38,6 +38,13 @@ Boot LightMoss from TF1, then over SSH run:
 It copies this system to the eMMC (everything on the eMMC is erased) and
 gives it its own disk ID. Afterwards, with no LightMoss card in TF1, the
 device boots from the eMMC; a LightMoss card in TF1 still takes precedence.
+
+Updates over WiFi
+-----------------
+spruce's app list has "LightMoss Update" (LightMoss puts it on the spruce
+card). It installs the newest LightMoss release from GitHub on whatever
+LightMoss runs from (the eMMC, or this card), keeping spruce and its settings.
+It needs WiFi, and the charger connected when the device restarts to install.
 
 Installing or updating the eMMC without SSH
 -------------------------------------------

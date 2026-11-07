@@ -29,6 +29,8 @@ jobs:
       # Keep buildroot's downloads and ccache where actions/cache can find them.
       BR2_DL_DIR: ${{ github.workspace }}/dl
       BR_CACHE_DIR: ${{ github.workspace }}/ccache
+      # Where the LightMoss Update app looks for releases (os-release).
+      LIGHTMOSS_REPO: ${{ github.repository }}
     steps:
       - name: Free disk space
         run: |

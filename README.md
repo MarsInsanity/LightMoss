@@ -75,6 +75,15 @@ target goes to the image's buildroot (`make menuconfig`, `make linux-menuconfig`
 32-bit one (`make lib32-menuconfig`, ...). After changing the 32-bit build,
 `make lightmoss-lib32-reinstall all` puts it in the image.
 
+After a build, `board/r36s/test-updater.sh` (as root) runs the boot-time
+updater against disk images of a card and an eMMC: a fresh eMMC install, an
+eMMC update, an in-place update of the card, and the refusals (no charger, a
+damaged image, an image on the partition about to be overwritten).
+
+**Publishing a release:** push a tag such as `v0.2.0`. CI builds it with that
+version and attaches `lightmoss-r36s-v0.2.0.img.xz` and its `.sha256` to a
+GitHub release, which is what the LightMoss Update app installs.
+
 ### Why buildroot 2025.11 and not 2026.02
 
 The only kernel with complete support for this board is the 4.4 BSP kernel,
@@ -151,6 +160,21 @@ an empty `lightmoss-install` on the TF1 card's BOOT, charger, power on.
 Booting from the eMMC with TF1 empty works on a G80CA (LightMoss 907b979, installed
 with `LightMoss.rkimg` over EmuELEC).
 
+### Updates over WiFi: the LightMoss Update app
+
+LightMoss puts a spruce app, **LightMoss Update**, on the spruce card
+(`App/LightMossUpdate`) every time it starts, so the card always has the one
+that matches the installed LightMoss. With WiFi on, it looks at the newest
+release on GitHub (the repository in `LIGHTMOSS_REPO` of `/etc/os-release`),
+and if it is not the installed version, downloads its image to the root of the
+spruce card as `LightMoss.rkimg`, checks it against the release's `.sha256`
+(fetched over a verified connection), sets `lightmoss-update` on BOOT and
+restarts. The updater then rewrites **the disk LightMoss runs from**, the eMMC
+or the TF1 card, in place: the boot loader, BOOT and the system partition, as
+above, keeping SPRUCEOS, spruce and the settings. Only with the charger
+connected; until then the update waits, and every start says so. The image
+left on the card is removed at the next start.
+
 ## Boot time
 
 What LightMoss itself spends between power-on and spruce's `runtime.sh`, and
@@ -178,7 +202,7 @@ Everything after `runtime.sh` starts is spruce's own startup.
 | `logo.bmp`, `battery_*.bmp` | boot logo, and the charging screen's pictures (drawn by `board/r36s/make-charge-images.py`) |
 | `lightmoss-debug` (create it) | kernel and systemd text on screen, logs exported to `logs/` |
 | `headphones-invert` (create it) | for boards that report the headphone jack the other way round |
-| `lightmoss-ledtest` (create it) | one-off, before spruce: 7 numbered steps that drive the blue LED's candidate pins (GPIO0 PA0, PC1, PB5) low, high and released; note the steps with the LED off. Details in `lightmoss-ledtest.txt` |
+| `lightmoss-ledtest` (create it) | one-off, before spruce: 7 numbered steps that drive the blue LED's candidate pins (GPIO0 PA0, PC1, PB5) low, high and released; note the steps with the LED on. Details in `lightmoss-ledtest.txt` |
 
 ## Layout of this repository
 
@@ -192,6 +216,9 @@ board/r36s/rootfs-overlay/           systemd units and scripts (spruce hand-off,
                                      /boot mount, first boot, eMMC installer)
 board/r36s/genimage.cfg              disk layout
 board/r36s/post-build.sh             os-release, spruce login, compat links
+board/r36s/initramfs/init            the boot-time updater (uInitrd)
+board/r36s/test-updater.sh           tests it against disk images
+board/r36s/spruce-app/               the LightMoss Update app (+ make-app-icon.py)
 package/rk3326-uboot/                legacy Rockchip U-Boot (+ patches)
 package/linaro-gcc6-aarch64/         the GCC 6.3 toolchain that U-Boot needs
 package/rk3326-mali/                 Mali-G31 user-space blob (64- and 32-bit)
