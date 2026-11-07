@@ -1,10 +1,10 @@
 #!/bin/sh
-# One-off LED test: finds which pin, in which state, darkens the G80CA's
+# One-off LED test: finds which pin, in which state, lights the G80CA's
 # blue LED, without SSH. Runs before spruce when BOOT holds an empty file
 # named "lightmoss-ledtest", and deletes it, so it runs once.
 #
 # Each numbered step holds one pin in one state for a few seconds while the
-# screen shows the step number: note the steps at which the LED is OFF.
+# screen shows the step number: note the steps at which the LED is ON.
 # Every pin is put back as it was after its steps. The pins (GPIO0, by
 # register, so the joypad's own rumble pin can be tried too):
 #   PA0  the LED as the joypad has it (arkos4clone's led-blue)
@@ -78,7 +78,7 @@ show() {
 	echo "---"
 } > "$LOG" 2>&1
 
-show "Write down the step numbers at which the LED is OFF.
+show "Write down the step numbers at which the LED is ON.
   Starting in a few seconds..."
 sleep 6
 
@@ -99,7 +99,7 @@ for p in 0:PA0:low,high,released 17:PC1:low,high 13:PB5:low,high; do
 	echo "$name restored: $(pin_state "$bit")" >> "$LOG"
 done
 
-show "Done. Which step numbers had the LED OFF?
+show "Done. Which step numbers had the LED ON?
   (The answer is all that is needed; the details are in
   lightmoss-ledtest.txt on BOOT.)"
 sync

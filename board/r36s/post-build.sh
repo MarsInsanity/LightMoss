@@ -9,6 +9,9 @@ EXT="${BR2_EXTERNAL_LIGHTMOSS_PATH:-$(cd "$(dirname "$0")/../.." && pwd)}"
 # LIGHTMOSS_VERSION from the environment (CI), else the git tag/commit, else the date.
 VERSION="${LIGHTMOSS_VERSION:-$(git -C "$EXT" describe --tags --always --dirty 2>/dev/null || date +%Y%m%d)}"
 echo "$VERSION" > "${BINARIES_DIR}/lightmoss-version"
+# Where its releases are published, for the LightMoss Update app: CI passes its
+# own repository, so a fork's builds update from the fork.
+REPO="${LIGHTMOSS_REPO:-MarsInsanity/LightMoss}"
 
 # --- os-release: what spruce and PortMaster read ------------------------------
 # spruce's platform detection (helperFunctions.sh) recognises a dArkMoss base by
@@ -27,15 +30,28 @@ ID=lightmoss
 ID_LIKE=buildroot
 VERSION_ID="$VERSION"
 PRETTY_NAME="LightMoss $VERSION (R36S clone G80CA)"
-HOME_URL="https://github.com/MarsInsanity/LightMoss"
+HOME_URL="https://github.com/$REPO"
 OS_NAME="DARKMOSS"
 SPRUCE_PLATFORM="G350"
 HW_DEVICE="R36S"
 DARKMOSS_UNIT="r36sclone"
 OS_VERSION="999.0.0"
 LIGHTMOSS_VERSION="$VERSION"
+LIGHTMOSS_REPO="$REPO"
 EOF
 ln -sf ../usr/lib/os-release "$TARGET_DIR/etc/os-release"
+
+# --- the LightMoss Update app ------------------------------------------------------
+# A spruce app, kept here and put on the spruce card before spruce starts
+# (usr/libexec/lightmoss/spruce-app), so the card always has the one that
+# knows how this LightMoss updates.
+APP="$TARGET_DIR/usr/share/lightmoss/spruce-app/LightMossUpdate"
+rm -rf "${APP:?}"
+mkdir -p "$APP"
+cp "$EXT"/board/r36s/spruce-app/LightMossUpdate/* "$APP/"
+PYTHON="${HOST_DIR:-}/bin/python3"
+[ -x "$PYTHON" ] || PYTHON=python3
+"$PYTHON" "$EXT/board/r36s/make-app-icon.py" "$APP/icon.png"
 
 # --- Debian library path ----------------------------------------------------------
 # spruce's dArkMoss code and PortMaster (PYSDL2_DLL_PATH, LD_LIBRARY_PATH) look for
