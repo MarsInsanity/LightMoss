@@ -80,9 +80,13 @@ updater against disk images of a card and an eMMC: a fresh eMMC install, an
 eMMC update, an in-place update of the card, and the refusals (no charger, a
 damaged image, an image on the partition about to be overwritten).
 
-**Publishing a release:** push a tag such as `v0.2.0`. CI builds it with that
-version and attaches `lightmoss-r36s-v0.2.0.img.xz` and its `.sha256` to a
-GitHub release, which is what the LightMoss Update app installs.
+**Publishing a release:** bump the version in `.github/lightmoss-version`
+(`v0.1.0` -> `v0.1.1`) and push. When the build of a push finds that version
+unreleased, it builds the image as that version and publishes it as a GitHub
+release (creating the tag) with `lightmoss-r36s-<version>.img.xz` and its
+`.sha256`, which is what the LightMoss Update app installs. Pushes that leave
+the version alone build development images (`<describe>-<date>`, kept as the
+run's artifact). Pushing a `v*` tag yourself also publishes that release.
 
 ### Why buildroot 2025.11 and not 2026.02
 
