@@ -2,7 +2,11 @@ name: build
 
 # Builds the LightMoss image for the R36S clone (G80CA).
 #   - every push: the image is attached to the run as an artifact
-#   - a tag (v1.2.3): the image is also published as a GitHub release
+#   - a push whose .github/lightmoss-version names a version that has no
+#     release yet: the image is also published as that GitHub release (the
+#     workflow creates the tag), which is what the LightMoss Update app
+#     installs. To release, bump that file.
+#   - a pushed tag (v1.2.3): published as that release, too
 #   - "Run workflow" on the Actions page builds any branch by hand
 on:
   push:
@@ -52,10 +56,27 @@ jobs:
 
       - name: Version
         id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          if [ "${GITHUB_REF_TYPE}" = tag ]; then v="${GITHUB_REF_NAME}"; else v="$(git describe --tags --always)-$(date -u +%Y%m%d)"; fi
+          # A release build carries its version (os-release, file names);
+          # anything else is a development build named after the commit.
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            v="${GITHUB_REF_NAME}"; release=1
+          else
+            want="$(tr -d ' \r\n' < .github/lightmoss-version 2>/dev/null)"
+            if [ -n "$want" ] && ! git rev-parse -q --verify "refs/tags/$want" >/dev/null &&
+               ! gh release view "$want" >/dev/null 2>&1; then
+              v="$want"; release=1
+            else
+              v="$(git describe --tags --always)-$(date -u +%Y%m%d)"; release=0
+            fi
+          fi
           echo "LIGHTMOSS_VERSION=$v" >> "$GITHUB_ENV"
           echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          echo "Version: $v (release: $release)"
 
       # Restored here, saved after the build even when it fails: a failed
       # build's downloads and compiler cache still spare the next one most
@@ -126,9 +147,12 @@ jobs:
           if-no-files-found: error
 
       - name: Release
-        if: github.ref_type == 'tag'
+        if: steps.version.outputs.release == '1'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          V: ${{ steps.version.outputs.version }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --title "LightMoss $GITHUB_REF_NAME" --generate-notes \
+          # Creates the tag on this commit when it does not exist yet.
+          gh release create "$V" --target "$GITHUB_SHA" --title "LightMoss $V" --generate-notes \
             output/images/lightmoss-r36s-*.img.xz output/images/lightmoss-r36s-*.img.xz.sha256
