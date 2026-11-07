@@ -1,11 +1,16 @@
 [Unit]
 Description=Hand off to spruce
-# The frontend starts last, once the base system is up. mount-spruce waits for
-# the card itself; there is no mount unit for it.
-After=multi-user.target lightmoss-firstboot.service
+# As soon as what spruce needs is there, not after the whole boot
+# (multi-user.target, then Type=idle's wait for every other job cost about a
+# second): BOOT and the devices (basic.target, implied), the mixer restored and
+# the headphone switch, SPRUCEOS on a first boot, and NetworkManager on D-Bus,
+# since spruce's startup runs nmcli. mount-spruce waits for the card itself;
+# there is no mount unit for it.
+After=local-fs.target systemd-udev-trigger.service alsa-restore.service alsa-state.service
+After=hpjackd.service NetworkManager.service lightmoss-firstboot.service lightmoss-ledtest.service
 
 [Service]
-Type=idle
+Type=simple
 # spruce runs as root and does its own mounts and hardware access. Its scripts
 # use $HOME (ALSA's ~/.asoundrc, among others).
 Environment=HOME=/root

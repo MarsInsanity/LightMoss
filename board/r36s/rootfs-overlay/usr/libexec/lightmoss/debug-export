@@ -22,6 +22,18 @@ dmesg                       > "$OUT/dmesg.log"         2>/dev/null
 	echo "cmdline: $(cat /proc/cmdline)"
 	echo "uptime:  $(uptime 2>/dev/null)"
 	echo
+	# (A debug boot is slower than a plain one: the kernel and systemd print
+	# on the screen.)
+	echo "--- boot timing (seconds since the kernel started)"
+	us() { awk -v v="$1" -v l="$2" 'BEGIN { if (v > 0) printf "%8.3f  %s\n", v / 1000000, l }'; }
+	us "$(systemctl show -P UserspaceTimestampMonotonic)" "systemd started (root mounted)"
+	for u in sysinit.target basic.target NetworkManager.service multi-user.target; do
+		us "$(systemctl show -P ActiveEnterTimestampMonotonic "$u")" "$u up"
+	done
+	us "$(systemctl show -P InactiveExitTimestampMonotonic spruce-launch.service)" "spruce hand-off starts (mount-spruce)"
+	us "$(systemctl show -P ExecMainStartTimestampMonotonic spruce-launch.service)" "spruce's runtime.sh starts"
+	us "$(systemctl show -P FinishTimestampMonotonic)" "boot jobs all done"
+	echo
 	echo "--- os-release"; cat /etc/os-release
 	echo; echo "--- block devices"; lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINT
 	echo; echo "--- mounts"; mount

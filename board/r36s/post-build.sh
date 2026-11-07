@@ -61,6 +61,16 @@ if ! grep -q '^spruce:' "$TARGET_DIR/etc/passwd"; then
 	echo "spruce:${ROOT_HASH}:::::::" >> "$TARGET_DIR/etc/shadow"
 fi
 
+# --- systemd generators: only the ones LightMoss has a use for -------------------
+# Each runs as its own program before systemd starts any unit, on every boot.
+# Kept: fstab (mounts), debug (systemd.mask= and friends on the kernel command
+# line, for debugging). Gone: getty (tty1 is spruce's; no consoles), gpt-auto
+# (the disks are MBR), ssh (SSH is dropbear's "ssh" unit), system-update (no
+# offline updates), tpm2 (no TPM), run (no systemd.run= on the command line).
+for g in getty gpt-auto ssh system-update tpm2 run; do
+	rm -f "$TARGET_DIR/usr/lib/systemd/system-generators/systemd-$g-generator"
+done
+
 # --- SSH: dropbear as the "ssh" unit spruce toggles ---------------------------------
 # board/r36s/rootfs-overlay ships ssh.service; buildroot's dropbear.service would
 # be a second, always-on server.

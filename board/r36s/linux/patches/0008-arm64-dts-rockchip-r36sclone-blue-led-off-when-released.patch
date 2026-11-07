@@ -10,7 +10,7 @@ releases the pin when no effect plays; an effect drives it low.
 ---
 --- a/arch/arm64/boot/dts/rockchip/rk3326-r36sclone-linux.dts
 +++ b/arch/arm64/boot/dts/rockchip/rk3326-r36sclone-linux.dts
-@@ -68,12 +68,19 @@
+@@ -68,12 +68,18 @@
  		/*
  		 * The G80CA has no rumble motor. Its blue front LED (gpio0 PA0,
  		 * arkos4clone's led-blue) stands in for one, the way spruce blinks
@@ -20,8 +20,7 @@ releases the pin when no effect plays; an effect drives it low.
 -		 * Off otherwise, after the driver's 1 s rumble at probe.
 +		 * the LED on the MagicX Zero 28: lit while a force-feedback effect
 +		 * plays (spruce's vibrate: Game Switcher, held power/menu buttons, low
-+		 * battery; game rumble), and for a second when the joypad probes at
-+		 * boot. Off otherwise, asleep included.
++		 * battery; game rumble). Off otherwise, at boot and asleep included.
 +		 *
 +		 * Off is the pin released (an input), as builds that never touched
 +		 * it left it: the LED was dark there. Driven, it was seen lit: on
