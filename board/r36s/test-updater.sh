@@ -17,7 +17,8 @@
 # its image on that card's own SPRUCEOS; an image only on the partition about
 # to be overwritten (refused); no charger (nothing happens; the app's update
 # keeps waiting); the charger and no image (a plain start, nothing written);
-# a damaged image (set aside).
+# a damaged image and an uncompressed one (set aside); a disk that does not
+# read back what was written (stops after a second try, no restart).
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -159,7 +160,7 @@ check "eMMC boot loader is the image's" '[ "$(dd if="$W/emmc.disk" bs=512 skip=6
 check "eMMC boot.ini boots its own root" 'fat_cat emmc 1 boot.ini | grep -q "root=PARTUUID=$ES-02"'
 check "image renamed .done, old lightmoss-install cleared" 'fat_has tf1 3 LightMoss.rkimg.done && ! fat_has tf1 3 LightMoss.rkimg && ! fat_has tf1 1 lightmoss-install'
 check "tf1's system untouched" '[ "$(psum tf1 2)" = "$TF1_P2" ]'
-check "update log on tf1's BOOT" 'fat_cat tf1 1 lightmoss-update.log | grep -q "mode: install"'
+check "update log on tf1's BOOT, written and verified" 'fat_cat tf1 1 lightmoss-update.log | grep -q "mode: install" && fat_cat tf1 1 lightmoss-update.log | grep -q "written and verified"'
 
 # --- 2: eMMC update keeps SPRUCEOS and the device's settings ---------------------
 echo "2. eMMC update from another name (lightmoss-r36s-v9.9.9.RKIMG; SPRUCEOS behind the eMMC's system)"
@@ -178,7 +179,7 @@ check "eMMC SPRUCEOS kept, with its files" '[ "$(mbr_start "$W/emmc.disk" 3)" = 
 check "machine ID and SSH host key kept" 'ext_do emmc 2 "grep -qx emmc-machine-id etc/machine-id && grep -qx key etc/dropbear/dropbear_ed25519_host_key"'
 check "headphones-invert and lightmoss-debug kept" 'fat_has emmc 1 headphones-invert && fat_has emmc 1 lightmoss-debug'
 check "eMMC boot.ini boots its own root" 'fat_cat emmc 1 boot.ini | grep -q "root=PARTUUID=$ES-02"'
-check "mode was update, image renamed .done" 'fat_cat tf1 1 lightmoss-update.log | grep -q "mode: update" && fat_has tf1 3 lightmoss-r36s-v9.9.9.RKIMG.done'
+check "mode was update, verified, image renamed .done" 'fat_cat tf1 1 lightmoss-update.log | grep -q "mode: update" && fat_cat tf1 1 lightmoss-update.log | grep -q "written and verified" && fat_has tf1 3 lightmoss-r36s-v9.9.9.RKIMG.done'
 fat_del tf1 3 lightmoss-r36s-v9.9.9.RKIMG.done
 
 # --- 3: in-place update of the card the system runs from -------------------------
@@ -196,12 +197,12 @@ check "tf1 machine ID kept" 'ext_do tf1 2 "grep -qx tf1-machine-id etc/machine-i
 check "flag cleared, lightmoss-debug kept" '! fat_has tf1 1 lightmoss-update && fat_has tf1 1 lightmoss-debug'
 check "tf1 boot.ini boots its own root" 'fat_cat tf1 1 boot.ini | grep -q "root=PARTUUID=4c4d3336-02"'
 check "the eMMC untouched (partition table, signature, system)" '[ "$(dd if="$W/emmc.disk" bs=512 count=1 2>/dev/null | md5sum)" = "$EMMC_MBR" ] && [ "$(psum emmc 2)" = "$EMMC_P2" ]'
-check "target was tf1, mode update" 'fat_cat tf1 1 lightmoss-update.log | grep -q "target: tf1" && fat_cat tf1 1 lightmoss-update.log | grep -q "mode: update"'
+check "target was tf1, mode update, verified" 'fat_cat tf1 1 lightmoss-update.log | grep -q "target: tf1" && fat_cat tf1 1 lightmoss-update.log | grep -q "mode: update" && fat_cat tf1 1 lightmoss-update.log | grep -q "written and verified"'
 
 # --- 4: an image on the partition about to be overwritten ------------------------
 echo "4. in place, the only image on tf1's own BOOT: refused"
 fat_del tf1 3 LightMoss.rkimg.done
-head -c 510 /dev/zero > "$W/fake"; printf '\125\252' >> "$W/fake"
+head -c 1024 /dev/zero | xz > "$W/fake"
 fat_put tf1 1 "$W/fake" LightMoss.rkimg
 fat_put tf1 1 "$W/empty" lightmoss-update
 P2_SUM="$(psum tf1 2)"
@@ -237,6 +238,25 @@ fat_put tf1 3 "$W/damaged.xz" broken.rkimg
 run tf1 1
 check "nothing written" '[ "$(psum emmc 2)" = "$EMMC_P2" ] && ! grep -q "written:" "$LOG"'
 check "set aside as .bad" 'fat_has tf1 3 broken.rkimg.bad && ! fat_has tf1 3 broken.rkimg'
+fat_del tf1 3 broken.rkimg.bad
+
+# --- 8: an uncompressed image --------------------------------------------------------
+echo "8. an uncompressed image (charger): set aside, nothing written"
+head -c 4000000 "$RAW" > "$W/raw.img"
+fat_put tf1 3 "$W/raw.img" raw.rkimg
+run tf1 1
+check "nothing written, said why" '[ "$(psum emmc 2)" = "$EMMC_P2" ] && ! grep -q "written:" "$LOG" && grep -q "not a compressed LightMoss release image" "$LOG"'
+check "set aside as .bad" 'fat_has tf1 3 raw.rkimg.bad && ! fat_has tf1 3 raw.rkimg'
+fat_del tf1 3 raw.rkimg.bad
+
+# --- 9: a disk that does not read back what was written --------------------------------
+echo "9. the eMMC reads back something else (failing): a second try, then stop"
+fat_put tf1 3 "$XZ" LightMoss.rkimg
+readback() { echo 0000000000000000000000000000000000000000000000000000000000000000; }
+run tf1 1
+check "written twice, then stopped without a restart" '[ "$(grep -c "^written:" "$LOG")" = 2 ] && grep -q "does not read back" "$LOG" && [ "$RC" = 2 ]'
+check "eMMC partition table put back (signature, SPRUCEOS)" '[ "$(sig emmc)" = "$ES" ] && [ "$(mbr_start "$W/emmc.disk" 3)" = "$E3" ]'
+check "the image left in place for another go" 'fat_has tf1 3 LightMoss.rkimg'
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "All checks passed."; else echo "$FAILS check(s) FAILED."; fi

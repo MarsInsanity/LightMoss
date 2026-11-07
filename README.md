@@ -132,15 +132,19 @@ EmuELEC (from a LightMoss card in TF1) as for updates (from the eMMC itself).
 
 The updater (a small initramfs that every start goes through) looks, when the
 charger is connected, at the root of every FAT32/exFAT partition of every card
-for `*.rkimg`, checks the first usable one and writes it to the eMMC: on an
+for `*.rkimg`. It takes release images (`.img.xz`) only and tests xz's checksum
+over the whole file before writing; after writing, it reads the disk back and
+compares it with the image (a second try if they differ, then it stops and
+says so instead of starting a damaged system). It writes the first usable one
+to the eMMC: on an
 eMMC that holds LightMoss it keeps the partition table, `SPRUCEOS`, the disk
 signature, the SSH host keys, the machine ID, the panel choice,
 `headphones-invert` and `lightmoss-debug`; anything else on the eMMC (EmuELEC)
 gets a fresh install. The file is then renamed `<name>.rkimg.done` and the
 device restarts; take the TF1 card out (or put the spruce card there) to boot
 the eMMC. Without the charger nothing happens. A file that is not a usable
-image is renamed `<name>.rkimg.bad`; an image is never read from a partition it
-is about to overwrite.
+image (damaged, uncompressed) is renamed `<name>.rkimg.bad`; an image is never
+read from a partition it is about to overwrite.
 
 **Updating the eMMC from a LightMoss card:** flash the new image to a TF1 card,
 boot it, and run `lightmoss-install-emmc` again. On an eMMC that already holds LightMoss it
@@ -165,8 +169,11 @@ LightMoss puts a spruce app, **LightMoss Update**, on the spruce card
 that matches the installed LightMoss. With WiFi on, it looks at the newest
 release on GitHub (the repository in `LIGHTMOSS_REPO` of `/etc/os-release`),
 and if it is not the installed version, downloads its image to the root of the
-spruce card as `LightMoss.rkimg`, checks it against the release's `.sha256`
-(fetched over a verified connection), sets `lightmoss-update` on BOOT (which
+spruce card. The download resumes where it stopped when the WiFi drops (up to
+8 times, and again the next time the app is opened: the partial file is kept as
+`LightMoss-<version>.rkimg.part`). It is then checked against the release's
+`.sha256`, fetched over a verified connection (a release without one is not
+installed), renamed `LightMoss.rkimg`, and the app sets `lightmoss-update` on BOOT (which
 points the updater at the running system's own disk rather than the eMMC) and
 restarts. The updater then rewrites **the disk LightMoss runs from**, the eMMC
 or the TF1 card, in place: the boot loader, BOOT and the system partition, as

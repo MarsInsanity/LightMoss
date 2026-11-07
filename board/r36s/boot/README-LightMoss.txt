@@ -45,6 +45,8 @@ spruce's app list has "LightMoss Update" (LightMoss puts it on the spruce
 card). It installs the newest LightMoss release from GitHub on whatever
 LightMoss runs from (the eMMC, or this card), keeping spruce and its settings.
 It needs WiFi, and the charger connected when the device restarts to install.
+A download the WiFi interrupts continues where it stopped, also the next time
+the app is opened. It is checked against the release's checksum.
 
 Installing or updating the eMMC without SSH
 -------------------------------------------
@@ -55,10 +57,12 @@ for example LightMoss.rkimg. Connect the charger and switch on. That is all.
 
 At every start with the charger connected, LightMoss looks for such a file
 and writes it to the internal eMMC: a LightMoss already there keeps SPRUCEOS
-and its settings; anything else (EmuELEC) is replaced. The file is then
-renamed <name>.rkimg.done and the device restarts. Take this card out of TF1
-to boot from the eMMC. Without the charger nothing happens; a file that is
-not a usable image is renamed <name>.rkimg.bad.
+and its settings; anything else (EmuELEC) is replaced. Only release images
+(.img.xz) are taken; the file's checksum is tested first, and what was
+written is read back and compared. The file is then renamed
+<name>.rkimg.done and the device restarts. Take this card out of TF1 to boot
+from the eMMC. Without the charger nothing happens; a file that is not a
+usable image is renamed <name>.rkimg.bad.
 
 If the eMMC shows a "no SD card" screen and powers off when TF1 is empty, it
 holds an older LightMoss: start this card in TF1, with an .rkimg on a card
