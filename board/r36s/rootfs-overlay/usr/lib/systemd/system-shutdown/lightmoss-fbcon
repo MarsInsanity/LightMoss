@@ -1,0 +1,10 @@
+#!/bin/sh
+# systemd-shutdown hook ($1 = poweroff, reboot, halt or kexec): bind fbcon to
+# the panel again once every process is gone and the filesystems are
+# unmounted, just before the power is cut, so nothing on screen changes
+# before then. console-blank unbinds it before spruce starts, and with it
+# unbound a power-off can stall for 1-5 minutes in the kernel: seen on the
+# G350 (spruceUI/dArkMoss 42349e7, f3bceed, 90ac785), the same RK3326 and
+# kernel as the G80CA.
+[ "$1" = poweroff ] || exit 0
+exec /usr/libexec/lightmoss/console-blank --restore

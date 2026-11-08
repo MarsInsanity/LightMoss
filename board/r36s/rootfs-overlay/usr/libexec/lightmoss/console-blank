@@ -3,12 +3,22 @@
 # show through while PyUI hands the display to a game and back. /dev/fb0 is
 # untouched. Left alone when /boot/lightmoss-debug exists: a debugging session
 # wants the console and any panic on the screen.
-[ -e /boot/lightmoss-debug ] && exit 0
+#
+# --restore binds it again: the power-off shutdown hook
+# (/usr/lib/systemd/system-shutdown/lightmoss-fbcon) runs it at the very end,
+# because with fbcon unbound an RK3326 power-off can stall for minutes in the
+# kernel.
+BIND=0
+if [ "$1" = "--restore" ]; then
+	BIND=1
+elif [ -e /boot/lightmoss-debug ]; then
+	exit 0
+fi
 
 for vtcon in /sys/class/vtconsole/vtcon*; do
 	[ -e "$vtcon/name" ] || continue
 	case "$(cat "$vtcon/name" 2>/dev/null)" in
-		*"frame buffer device"*) echo 0 > "$vtcon/bind" 2>/dev/null ;;
+		*"frame buffer device"*) echo "$BIND" > "$vtcon/bind" 2>/dev/null ;;
 	esac
 done
 exit 0
