@@ -1,0 +1,9 @@
+config BR2_PACKAGE_SDL3_TTF
+	bool "sdl3_ttf"
+	depends on BR2_PACKAGE_SDL3
+	select BR2_PACKAGE_FREETYPE
+	help
+	  SDL3_ttf: TrueType fonts for SDL3, over FreeType (HarfBuzz
+	  shaping when HarfBuzz is enabled).
+
+	  https://github.com/libsdl-org/SDL_ttf

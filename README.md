@@ -21,7 +21,7 @@ nothing else.
 | Wi-Fi | MT7601U USB dongles on the OTG port (driver + firmware; dongles that first appear as a driver CD are switched with usb_modeswitch). No other Wi-Fi drivers. |
 | Hardware | Joypad and both sticks, volume keys, power key, rk817 audio with automatic headphone switching (`hpjackd`), rk817 battery/charger, backlight, both TF slots, eMMC, suspend, USB host on the OTG port (dongle, USB pad, USB DAC). |
 | Userland | glibc 2.42, systemd 257, NetworkManager + wpa_supplicant, dropbear (as the `ssh` unit), busybox, bash, ALSA utils, util-linux, e2fsprogs/dosfstools/exfatprogs. |
-| PortMaster runtime | SDL2 (KMSDRM + GLES), SDL2_image, SDL2_mixer, SDL2_ttf, SDL2_net, SDL2_gfx, OpenAL, libevdev, libgomp, libstdc++, zlib/png/jpeg/freetype/ogg/vorbis/theora/flac/modplug, squashfs + loop + overlayfs for PortMaster's runtimes, and Debian's `/usr/lib/aarch64-linux-gnu` path. |
+| PortMaster runtime | SDL2 (KMSDRM + GLES), SDL2_image, SDL2_mixer, SDL2_ttf, SDL2_net, SDL2_gfx, SDL3 (KMSDRM + GLES, as dArkMoss has since e598bfa), SDL3_image, SDL3_mixer, SDL3_ttf, OpenAL, libevdev, libgomp, libstdc++, zlib/png/jpeg/freetype/ogg/vorbis/theora/flac/modplug, squashfs + loop + overlayfs for PortMaster's runtimes, and Debian's `/usr/lib/aarch64-linux-gnu` path. |
 | 32-bit runtime | The same libraries built for armhf (plus libudev and the armhf Mali blob) in `/usr/lib/arm-linux-gnueabihf`, with the loader at `/lib/ld-linux-armhf.so.3`, Debian's paths: for 32-bit-only PortMaster ports and spruce's `ra32` cores. 32-bit `time_t`, the armhf ABI those binaries are built for (and the one whose ALSA calls the 4.4 kernel understands). |
 
 Left out on purpose: Python (spruce brings its own), Bluetooth (the R36S has no
@@ -234,6 +234,7 @@ package/linaro-gcc6-aarch64/         the GCC 6.3 toolchain that U-Boot needs
 package/rk3326-mali/                 Mali-G31 user-space blob (64- and 32-bit)
 package/lightmoss-lib32/             puts the 32-bit runtime in the image
 package/hpjackd/                     headphone jack -> rk817 Playback Path
+package/sdl3*/                       SDL3 and its image/mixer/ttf libraries
 ```
 
 ## Credits
