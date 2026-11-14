@@ -1,0 +1,29 @@
+From: Mars <53840971+MarsInsanity@users.noreply.github.com>
+Subject: cmake: let the GBM library name for KMS/DRM be set
+
+SDL3 takes the name it loads GBM by at run time from the real file behind
+libgbm.so, dropping a version suffix. When GBM comes with a GL driver
+blob, that file is the blob itself, with no version suffix (the RK3326
+Mali blob: libgbm.so -> libmali-bifrost-g31-rxp0-gbm.so), so SDL3 ends up
+loading the blob by its file name. SDL_KMSDRM_GBM_SONAME sets the name
+instead (libgbm.so.1, the name SDL2 loads).
+
+Linking GBM instead (SDL_KMSDRM_SHARED=OFF) is not an option with such a
+blob: its gbm.h predates the multi-plane calls that SDL3 only treats as
+optional when it loads GBM at run time.
+
+--- a/cmake/sdlchecks.cmake
++++ b/cmake/sdlchecks.cmake
+@@ -1410,7 +1410,11 @@
+         FindLibraryAndSONAME(gbm LIBDIRS ${PC_GBM_LIBRARY_DIRS})
+         if(DRM_LIB AND DRM_SHARED AND GBM_LIB AND GBM_SHARED)
+           set(SDL_VIDEO_DRIVER_KMSDRM_DYNAMIC "\"${DRM_LIB_SONAME}\"")
+-          set(SDL_VIDEO_DRIVER_KMSDRM_DYNAMIC_GBM "\"${GBM_LIB_SONAME}\"")
++          if(SDL_KMSDRM_GBM_SONAME)
++            set(SDL_VIDEO_DRIVER_KMSDRM_DYNAMIC_GBM "\"${SDL_KMSDRM_GBM_SONAME}\"")
++          else()
++            set(SDL_VIDEO_DRIVER_KMSDRM_DYNAMIC_GBM "\"${GBM_LIB_SONAME}\"")
++          endif()
+           set(HAVE_KMSDRM_SHARED TRUE)
+           sdl_link_dependency(kmsdrm-drm INCLUDES $<TARGET_PROPERTY:PkgConfig::PC_LIBDRM,INTERFACE_INCLUDE_DIRECTORIES>)
+           sdl_link_dependency(kmsdrm-gbm INCLUDES $<TARGET_PROPERTY:PkgConfig::PC_GBM,INTERFACE_INCLUDE_DIRECTORIES>)
