@@ -19,7 +19,10 @@ SDL3_DEPENDENCIES = host-pkgconf libdrm libgbm libegl libgles
 # SDL_ROCKCHIP would pick up the blob's mali.pc and add a second video driver
 # next to KMS/DRM; SDL2 has only KMS/DRM, and spruce's PyUI hands the
 # display over the same way to both. Its libraries are loaded at run time
-# (SDL_DEPS_SHARED, the default), as SDL2 does.
+# (SDL_DEPS_SHARED, the default), as SDL2 does, except libdrm and GBM: SDL3
+# would dlopen GBM by the blob's file name (libmali-bifrost-...-gbm.so, its
+# libgbm.so has no version suffix to go by), so it links them instead
+# (NEEDED libdrm.so.2 and libmali.so.1, the blob's soname), both always there.
 SDL3_CONF_OPTS = \
 	-DSDL_SHARED=ON \
 	-DSDL_STATIC=OFF \
@@ -31,6 +34,7 @@ SDL3_CONF_OPTS = \
 	-DSDL_CCACHE=OFF \
 	-DSDL_UNIX_CONSOLE_BUILD=ON \
 	-DSDL_KMSDRM=ON \
+	-DSDL_KMSDRM_SHARED=OFF \
 	-DSDL_OPENGLES=ON \
 	-DSDL_OPENGL=OFF \
 	-DSDL_X11=OFF \
