@@ -1,0 +1,23 @@
+config BR2_PACKAGE_SDL3
+	bool "sdl3"
+	depends on BR2_TOOLCHAIN_HAS_THREADS # libdrm
+	depends on !BR2_STATIC_LIBS
+	depends on BR2_PACKAGE_HAS_LIBGBM
+	depends on BR2_PACKAGE_HAS_LIBEGL
+	depends on BR2_PACKAGE_HAS_LIBGLES
+	select BR2_PACKAGE_LIBDRM
+	help
+	  Simple DirectMedia Layer 3, built the way SDL2 is here: the
+	  KMS/DRM video driver with OpenGL ES over the GBM/EGL provider
+	  (the Mali blob), ALSA audio, udev input hotplug. No X11,
+	  Wayland, Vulkan, PulseAudio, PipeWire or D-Bus.
+
+	  For PortMaster ports that link libSDL3.so.0 (dArkMoss and
+	  ArkOS carry it since spruceUI/dArkMoss e598bfa).
+
+	  https://www.libsdl.org/
+
+comment "sdl3 needs a GBM, EGL and OpenGL ES provider and a toolchain w/ threads, dynamic library"
+	depends on !BR2_PACKAGE_HAS_LIBGBM || !BR2_PACKAGE_HAS_LIBEGL || \
+		!BR2_PACKAGE_HAS_LIBGLES || !BR2_TOOLCHAIN_HAS_THREADS || \
+		BR2_STATIC_LIBS

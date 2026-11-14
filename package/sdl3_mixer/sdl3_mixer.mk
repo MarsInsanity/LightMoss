@@ -1,0 +1,70 @@
+################################################################################
+#
+# sdl3_mixer
+#
+################################################################################
+
+# The version dArkMoss builds (build_sdl3.sh, SDL3_MIXER_TAG).
+SDL3_MIXER_VERSION = 3.2.4
+SDL3_MIXER_SOURCE = SDL3_mixer-$(SDL3_MIXER_VERSION).tar.gz
+SDL3_MIXER_SITE = https://github.com/libsdl-org/SDL_mixer/releases/download/release-$(SDL3_MIXER_VERSION)
+SDL3_MIXER_LICENSE = Zlib
+SDL3_MIXER_LICENSE_FILES = LICENSE.txt
+SDL3_MIXER_INSTALL_STAGING = YES
+SDL3_MIXER_DEPENDENCIES = sdl3
+
+# The built-in decoders (dr_flac, dr_mp3, stb_vorbis, Timidity) are always
+# there; the libraries only when enabled, linked (not loaded at run time).
+SDL3_MIXER_CONF_OPTS = \
+	-DSDLMIXER_VENDORED=OFF \
+	-DSDLMIXER_DEPS_SHARED=OFF \
+	-DSDLMIXER_STRICT=ON \
+	-DSDLMIXER_TESTS=OFF \
+	-DSDLMIXER_EXAMPLES=OFF \
+	-DSDLMIXER_FLAC_DRFLAC=ON \
+	-DSDLMIXER_MP3_DRMP3=ON \
+	-DSDLMIXER_VORBIS_STB=ON \
+	-DSDLMIXER_VORBIS_TREMOR=OFF \
+	-DSDLMIXER_MIDI_TIMIDITY=ON \
+	-DSDLMIXER_MIDI_FLUIDSYNTH=OFF \
+	-DSDLMIXER_GME=OFF
+
+ifeq ($(BR2_PACKAGE_FLAC),y)
+SDL3_MIXER_DEPENDENCIES += flac
+SDL3_MIXER_CONF_OPTS += -DSDLMIXER_FLAC_LIBFLAC=ON
+else
+SDL3_MIXER_CONF_OPTS += -DSDLMIXER_FLAC_LIBFLAC=OFF
+endif
+
+ifeq ($(BR2_PACKAGE_LIBVORBIS),y)
+SDL3_MIXER_DEPENDENCIES += libvorbis
+SDL3_MIXER_CONF_OPTS += -DSDLMIXER_VORBIS_VORBISFILE=ON
+else
+SDL3_MIXER_CONF_OPTS += -DSDLMIXER_VORBIS_VORBISFILE=OFF
+endif
+
+ifeq ($(BR2_PACKAGE_MPG123),y)
+SDL3_MIXER_DEPENDENCIES += mpg123
+SDL3_MIXER_CONF_OPTS += -DSDLMIXER_MP3_MPG123=ON
+else
+SDL3_MIXER_CONF_OPTS += -DSDLMIXER_MP3_MPG123=OFF
+endif
+
+ifeq ($(BR2_PACKAGE_OPUSFILE),y)
+SDL3_MIXER_DEPENDENCIES += opusfile
+SDL3_MIXER_CONF_OPTS += -DSDLMIXER_OPUS=ON
+else
+SDL3_MIXER_CONF_OPTS += -DSDLMIXER_OPUS=OFF
+endif
+
+ifeq ($(BR2_PACKAGE_WAVPACK),y)
+SDL3_MIXER_DEPENDENCIES += wavpack
+SDL3_MIXER_CONF_OPTS += -DSDLMIXER_WAVPACK=ON
+else
+SDL3_MIXER_CONF_OPTS += -DSDLMIXER_WAVPACK=OFF
+endif
+
+# MOD needs libxmp, which buildroot does not package.
+SDL3_MIXER_CONF_OPTS += -DSDLMIXER_MOD=OFF
+
+$(eval $(cmake-package))

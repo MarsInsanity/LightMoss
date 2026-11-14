@@ -1,0 +1,9 @@
+config BR2_PACKAGE_SDL3_MIXER
+	bool "sdl3_mixer"
+	depends on BR2_PACKAGE_SDL3
+	help
+	  SDL3_mixer: audio mixing for SDL3. WAV, AIFF, VOC, AU, FLAC,
+	  MP3, Ogg Vorbis and MIDI (Timidity) built in; libFLAC,
+	  libvorbisfile, mpg123, opusfile and WavPack when enabled.
+
+	  https://github.com/libsdl-org/SDL_mixer

@@ -1,0 +1,9 @@
+config BR2_PACKAGE_SDL3_IMAGE
+	bool "sdl3_image"
+	depends on BR2_PACKAGE_SDL3
+	help
+	  SDL3_image: image loading for SDL3. BMP, GIF, JPEG (stb_image),
+	  PNG (libpng when enabled), SVG, QOI, TGA and the other built-in
+	  formats; TIFF and WebP when those libraries are enabled.
+
+	  https://github.com/libsdl-org/SDL_image

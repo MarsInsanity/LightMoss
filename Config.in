@@ -13,4 +13,8 @@ config BR2_LIGHTMOSS_LIB32
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/rk3326-uboot/Config.in"
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/hpjackd/Config.in"
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/lightmoss-lib32/Config.in"
+	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/sdl3/Config.in"
+	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/sdl3_image/Config.in"
+	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/sdl3_mixer/Config.in"
+	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/sdl3_ttf/Config.in"
 endmenu
