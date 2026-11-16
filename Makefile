@@ -2,6 +2,9 @@
 #
 #   make            build the 32-bit runtime, then the image
 #                   (output/images/lightmoss-r36s-<version>.img.xz)
+#   make BOARD=rpminiv2
+#                   the same for the Retroid Pocket Mini V2, in output-rpminiv2/
+#                   (output-rpminiv2/images/lightmoss-rpminiv2-<version>.img.xz)
 #   make lib32      only the 32-bit (armhf) runtime, into output-lib32/
 #   make menuconfig / linux-menuconfig / savedefconfig / clean / ...
 #                   any other target is passed to the image's buildroot
@@ -10,15 +13,23 @@
 #
 # buildroot itself is fetched on first use, pinned to BR_VERSION: 2025.11.x is
 # the last series with systemd 257, the last systemd that still boots on the
-# R36S's 4.4 kernel (cgroup v1). See README.md.
+# R36S's 4.4 kernel (cgroup v1). See README.md. Both boards share it.
+#
+# BOARD picks configs/lightmoss_$(BOARD)_defconfig and its _lib32_ twin. The
+# R36S keeps the output directories it always had (output, output-lib32).
 
 BR_VERSION   ?= 2025.11.3
 BR_REPO      ?= https://github.com/buildroot/buildroot.git
 BR_DIR       ?= $(CURDIR)/buildroot
+BOARD        ?= r36s
+ifeq ($(BOARD),r36s)
 O            ?= $(CURDIR)/output
+else
+O            ?= $(CURDIR)/output-$(BOARD)
+endif
 O32          ?= $(O)-lib32
-DEFCONFIG    ?= lightmoss_r36s_defconfig
-DEFCONFIG32  ?= lightmoss_r36s_lib32_defconfig
+DEFCONFIG    ?= lightmoss_$(BOARD)_defconfig
+DEFCONFIG32  ?= lightmoss_$(BOARD)_lib32_defconfig
 
 BR_MAKE   = $(MAKE) -C $(BR_DIR) O=$(O) BR2_EXTERNAL=$(CURDIR) LM_LIB32_OUTPUT=$(O32)
 BR32_MAKE = $(MAKE) -C $(BR_DIR) O=$(O32) BR2_EXTERNAL=$(CURDIR)

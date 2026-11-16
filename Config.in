@@ -4,7 +4,7 @@ config BR2_LIGHTMOSS_LIB32
 	bool "LightMoss 32-bit (armhf) runtime build"
 	depends on BR2_ARM_EABIHF && BR2_TOOLCHAIN_USES_GLIBC
 	help
-	  Set only in configs/lightmoss_r36s_lib32_defconfig: this build
+	  Set only in configs/lightmoss_*_lib32_defconfig: this build
 	  is not an image but the armhf libraries the 64-bit image carries
 	  in /usr/lib/arm-linux-gnueabihf (package lightmoss-lib32). Its
 	  glibc's loader searches that directory.
@@ -17,4 +17,7 @@ config BR2_LIGHTMOSS_LIB32
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/sdl3_image/Config.in"
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/sdl3_mixer/Config.in"
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/sdl3_ttf/Config.in"
+	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/alsa-ucm-conf/Config.in"
+	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/lightmoss-firmware-sm8250/Config.in"
+	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/openabl/Config.in"
 endmenu

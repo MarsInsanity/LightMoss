@@ -1,0 +1,74 @@
+# LightMoss lib32: the 32-bit (armhf) runtime for the Retroid Pocket Mini V2.
+# Not an image: package lightmoss-lib32 copies this build's libraries into
+# the 64-bit image's /usr/lib/arm-linux-gnueabihf. Same toolchain versions as
+# lightmoss_rpminiv2_defconfig.
+
+# --- Architecture: the SM8250's cores in AArch32 (EL0 only on the A77s) -----------
+BR2_arm=y
+BR2_cortex_a76_a55=y
+BR2_ARM_EABIHF=y
+# NEON: same hard-float ABI as any armhf port, faster SDL2 and codecs.
+BR2_ARM_FPU_NEON_FP_ARMV8=y
+
+# --- Build options -------------------------------------------------------------
+BR2_BACKUP_SITE="https://sources.buildroot.net"
+BR2_CCACHE=y
+BR2_OPTIMIZE_2=y
+# SDL2's panel rotation, as in the 64-bit build.
+BR2_GLOBAL_PATCH_DIR="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/rpminiv2/patches"
+
+# --- Toolchain -------------------------------------------------------------------
+BR2_TOOLCHAIN_BUILDROOT_GLIBC=y
+BR2_KERNEL_HEADERS_6_12=y
+BR2_GCC_VERSION_14_X=y
+BR2_TOOLCHAIN_BUILDROOT_CXX=y
+BR2_GCC_ENABLE_OPENMP=y
+# 32-bit time_t (BR2_TIME_BITS_64 off), the armhf ABI the 32-bit ports and
+# spruce's ra32 are built for, as in the R36S's lib32 build.
+# BR2_TIME_BITS_64 is not set
+
+# --- System: libraries only ---------------------------------------------------------
+BR2_LIGHTMOSS_LIB32=y
+BR2_INIT_NONE=y
+# libudev, for SDL2's input hotplug and the ports that link it.
+BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_EUDEV=y
+BR2_SYSTEM_BIN_SH_NONE=y
+# BR2_TARGET_GENERIC_GETTY is not set
+# BR2_PACKAGE_BUSYBOX is not set
+# BR2_TARGET_ROOTFS_TAR is not set
+
+# --- The runtime: what 32-bit ports and spruce's ra32 link against -----------------
+# Adreno 650 for 32-bit programs: Mesa's freedreno, as in the 64-bit build.
+BR2_PACKAGE_MESA3D=y
+BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_FREEDRENO=y
+BR2_PACKAGE_MESA3D_GBM=y
+BR2_PACKAGE_MESA3D_OPENGL_EGL=y
+BR2_PACKAGE_MESA3D_OPENGL_ES=y
+BR2_PACKAGE_ALSA_LIB=y
+BR2_PACKAGE_LIBEVDEV=y
+BR2_PACKAGE_SDL2=y
+BR2_PACKAGE_SDL2_KMSDRM=y
+BR2_PACKAGE_SDL2_OPENGLES=y
+BR2_PACKAGE_SDL2_IMAGE=y
+BR2_PACKAGE_SDL2_MIXER=y
+BR2_PACKAGE_SDL2_TTF=y
+BR2_PACKAGE_SDL2_NET=y
+BR2_PACKAGE_SDL2_GFX=y
+# SDL3 for the ports that link it (spruceUI/dArkMoss e598bfa): this tree's
+# package/sdl3*, built like SDL2 above (KMS/DRM, GLES, ALSA).
+BR2_PACKAGE_SDL3=y
+BR2_PACKAGE_SDL3_IMAGE=y
+BR2_PACKAGE_SDL3_MIXER=y
+BR2_PACKAGE_SDL3_TTF=y
+BR2_PACKAGE_OPENAL=y
+BR2_PACKAGE_FLAC=y
+BR2_PACKAGE_LIBMODPLUG=y
+BR2_PACKAGE_LIBOGG=y
+BR2_PACKAGE_LIBVORBIS=y
+BR2_PACKAGE_LIBTHEORA=y
+BR2_PACKAGE_FREETYPE=y
+BR2_PACKAGE_LIBPNG=y
+BR2_PACKAGE_JPEG=y
+BR2_PACKAGE_ZLIB=y
+BR2_PACKAGE_XZ=y
+BR2_PACKAGE_BZIP2=y

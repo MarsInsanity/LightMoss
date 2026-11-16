@@ -11,6 +11,11 @@ dArkMoss) hardware support on a buildroot userland instead of Debian: same
 kernel, same board device trees, same U-Boot, same hand-off to spruce, and
 nothing else.
 
+**Retroid Pocket Mini V2:** a second board, `make BOARD=rpminiv2`, installed
+on the internal storage next to Android and booted by OpenABL, with
+ROCKNIX's SM8250 kernel. See [board/rpminiv2/README.md](board/rpminiv2/README.md).
+Everything below is about the R36S.
+
 ## What is in it
 
 | | |

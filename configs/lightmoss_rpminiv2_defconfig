@@ -1,0 +1,174 @@
+# LightMoss for the Retroid Pocket Mini V2 (Snapdragon 865, SM8250).
+# A minimal base OS whose only job is to boot and hand off to spruce. It runs
+# from the internal UFS, next to Android (see board/rpminiv2/README.md).
+
+# --- Architecture: Kryo 585 (Cortex-A77 + A55), as ROCKNIX targets it ------------
+BR2_aarch64=y
+BR2_cortex_a76_a55=y
+
+# --- Build options -------------------------------------------------------------
+# https: sources.buildroot.net's plain http is often filtered.
+BR2_BACKUP_SITE="https://sources.buildroot.net"
+BR2_CCACHE=y
+BR2_OPTIMIZE_2=y
+# Hashes for the kernel tarball and patches for buildroot's own packages
+# (SDL2's panel rotation).
+BR2_GLOBAL_PATCH_DIR="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/rpminiv2/patches"
+
+# --- Toolchain: glibc (PortMaster ports are glibc binaries) --------------------
+BR2_TOOLCHAIN_BUILDROOT_GLIBC=y
+BR2_KERNEL_HEADERS_6_12=y
+BR2_GCC_VERSION_14_X=y
+BR2_TOOLCHAIN_BUILDROOT_CXX=y
+# libgomp: a number of PortMaster ports link against it.
+BR2_GCC_ENABLE_OPENMP=y
+
+# --- System --------------------------------------------------------------------
+BR2_TARGET_GENERIC_HOSTNAME="lightmoss"
+BR2_TARGET_GENERIC_ISSUE="LightMoss"
+BR2_INIT_SYSTEMD=y
+BR2_TARGET_GENERIC_ROOT_PASSWD="happygaming"
+# Nothing logs in on a console: tty1 belongs to spruce.
+# BR2_TARGET_GENERIC_GETTY is not set
+BR2_SYSTEM_BIN_SH_BUSYBOX=y
+# NetworkManager owns the network: no ifupdown network.service.
+# BR2_PACKAGE_IFUPDOWN_SCRIPTS is not set
+# spruce brings its own zoneinfo; the base only needs UTC.
+BR2_TARGET_TZ_ZONELIST="etcetera"
+BR2_TARGET_LOCALTIME="Etc/UTC"
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/rpminiv2/rootfs-overlay"
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/rpminiv2/post-build.sh"
+BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/rpminiv2/post-image.sh"
+
+# --- Kernel: mainline 7.2 with ROCKNIX's SM8250 patches ----------------------------
+# The same kernel, patches (board/rpminiv2/linux/patches/1-3, applied in that
+# order) and configuration as ROCKNIX's SM8250 build, plus LightMoss's own (4).
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="7.2"
+BR2_LINUX_KERNEL_PATCH="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/rpminiv2/linux/patches/1-mainline $(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/rpminiv2/linux/patches/2-linux-7.2 $(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/rpminiv2/linux/patches/3-sm8250 $(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/rpminiv2/linux/patches/4-lightmoss"
+BR2_LINUX_KERNEL_USE_CUSTOM_CONFIG=y
+BR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/rpminiv2/linux/rocknix-sm8250.config"
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/rpminiv2/linux/lightmoss.config"
+BR2_LINUX_KERNEL_DTS_SUPPORT=y
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="qcom/sm8250-retroidpocket-rpminiv2"
+BR2_LINUX_KERNEL_NEEDS_HOST_OPENSSL=y
+BR2_LINUX_KERNEL_NEEDS_HOST_LIBELF=y
+
+# --- Boot: OpenABL (installed in the abl partitions, see the README) boots the
+# kernel through its EFI stub from LMBOOT's Boot Loader Specification entries.
+# The OpenABL image itself goes on the card's boot partition, for installing.
+BR2_PACKAGE_OPENABL=y
+
+# --- Filesystem images -------------------------------------------------------------
+BR2_TARGET_ROOTFS_EXT2=y
+BR2_TARGET_ROOTFS_EXT2_4=y
+BR2_TARGET_ROOTFS_EXT2_LABEL="LIGHTMOSS"
+BR2_TARGET_ROOTFS_EXT2_SIZE="1024M"
+# BR2_TARGET_ROOTFS_TAR is not set
+BR2_PACKAGE_HOST_DOSFSTOOLS=y
+BR2_PACKAGE_HOST_GENIMAGE=y
+BR2_PACKAGE_HOST_MTOOLS=y
+
+# --- Hardware: firmware, GPU, audio, input ------------------------------------------
+# GPU, audio DSP, sensor DSP, video, Wi-Fi and Bluetooth firmware, as ROCKNIX
+# installs it (package/lightmoss-firmware-sm8250). The remote processors start
+# before the root filesystem is mounted, so the image's boot files also carry
+# them in an initramfs (post-image.sh).
+BR2_PACKAGE_LIGHTMOSS_FIRMWARE_SM8250=y
+BR2_PACKAGE_WIRELESS_REGDB=y
+# Adreno 650: Mesa's freedreno (OpenGL ES, EGL, GBM).
+BR2_PACKAGE_MESA3D=y
+BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_FREEDRENO=y
+BR2_PACKAGE_MESA3D_GBM=y
+BR2_PACKAGE_MESA3D_OPENGL_EGL=y
+BR2_PACKAGE_MESA3D_OPENGL_ES=y
+# The 32-bit (armhf) runtime, from configs/lightmoss_rpminiv2_lib32_defconfig.
+BR2_PACKAGE_LIGHTMOSS_LIB32=y
+BR2_PACKAGE_ALSA_LIB=y
+BR2_PACKAGE_ALSA_UTILS=y
+BR2_PACKAGE_ALSA_UTILS_ALSACTL=y
+BR2_PACKAGE_ALSA_UTILS_ALSAUCM=y
+BR2_PACKAGE_ALSA_UTILS_AMIXER=y
+BR2_PACKAGE_ALSA_UTILS_APLAY=y
+# The sound card's routing (speakers, headphones), as ROCKNIX sets it up.
+BR2_PACKAGE_ALSA_UCM_CONF=y
+BR2_PACKAGE_LIBEVDEV=y
+# Bluetooth (the QCA6390's) is left for later: spruce's platform for this
+# device does not offer it yet, and bluetoothd + bluealsa would be its job.
+
+# --- systemd: only what spruce relies on ----------------------------------------------
+# BR2_PACKAGE_SYSTEMD_HWDB is not set
+# BR2_PACKAGE_SYSTEMD_LOGIND is not set
+# BR2_PACKAGE_SYSTEMD_NETWORKD is not set
+# BR2_PACKAGE_SYSTEMD_RESOLVED is not set
+# BR2_PACKAGE_SYSTEMD_HOSTNAMED is not set
+# BR2_PACKAGE_SYSTEMD_TIMEDATED is not set
+# BR2_PACKAGE_SYSTEMD_LOCALED is not set
+# BR2_PACKAGE_SYSTEMD_MYHOSTNAME is not set
+# BR2_PACKAGE_SYSTEMD_VCONSOLE is not set
+# BR2_PACKAGE_SYSTEMD_BACKLIGHT is not set
+# BR2_PACKAGE_SYSTEMD_QUOTACHECK is not set
+# BR2_PACKAGE_SYSTEMD_UTMP is not set
+# BR2_PACKAGE_SYSTEMD_BINFMT is not set
+# BR2_PACKAGE_SYSTEMD_PSTORE is not set
+# BR2_PACKAGE_SYSTEMD_COREDUMP is not set
+# BR2_PACKAGE_SYSTEMD_FIRSTBOOT is not set
+# BR2_PACKAGE_SYSTEMD_HIBERNATE is not set
+BR2_PACKAGE_SYSTEMD_TIMESYNCD=y
+BR2_PACKAGE_SYSTEMD_RANDOMSEED=y
+
+# --- Networking: NetworkManager + wpa_supplicant (spruce drives Wi-Fi with nmcli) ---
+BR2_PACKAGE_NETWORK_MANAGER=y
+BR2_PACKAGE_NETWORK_MANAGER_CLI=y
+BR2_PACKAGE_WPA_SUPPLICANT=y
+BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y
+BR2_PACKAGE_WPA_SUPPLICANT_DBUS=y
+# spruce's Network Settings starts and stops the "ssh" unit (dropbear here).
+BR2_PACKAGE_DROPBEAR=y
+# BR2_PACKAGE_DROPBEAR_CLIENT is not set
+
+# --- Userland tools the base, spruce and PortMaster scripts call ------------------
+BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/r36s/busybox.fragment"
+BR2_PACKAGE_BASH=y
+BR2_PACKAGE_UTIL_LINUX=y
+BR2_PACKAGE_UTIL_LINUX_BINARIES=y
+BR2_PACKAGE_UTIL_LINUX_MOUNTPOINT=y
+BR2_PACKAGE_UTIL_LINUX_PARTX=y
+BR2_PACKAGE_E2FSPROGS=y
+BR2_PACKAGE_E2FSPROGS_RESIZE2FS=y
+BR2_PACKAGE_DOSFSTOOLS=y
+BR2_PACKAGE_DOSFSTOOLS_FSCK_FAT=y
+BR2_PACKAGE_DOSFSTOOLS_MKFS_FAT=y
+BR2_PACKAGE_EXFATPROGS=y
+# sgdisk: the installer grows a stock GPT's entry array before it adds
+# LightMoss's partitions behind Android's userdata.
+BR2_PACKAGE_GPTFDISK=y
+BR2_PACKAGE_GPTFDISK_SGDISK=y
+
+# --- Graphics/audio runtime for spruce's PyUI, emulators and PortMaster ports -----
+BR2_PACKAGE_SDL2=y
+BR2_PACKAGE_SDL2_KMSDRM=y
+BR2_PACKAGE_SDL2_OPENGLES=y
+BR2_PACKAGE_SDL2_IMAGE=y
+BR2_PACKAGE_SDL2_MIXER=y
+# SDL2_image and SDL2_mixer pick up whichever codec libraries are enabled.
+BR2_PACKAGE_FLAC=y
+BR2_PACKAGE_LIBMODPLUG=y
+BR2_PACKAGE_SDL2_TTF=y
+BR2_PACKAGE_SDL2_NET=y
+BR2_PACKAGE_SDL2_GFX=y
+BR2_PACKAGE_SDL3=y
+BR2_PACKAGE_SDL3_IMAGE=y
+BR2_PACKAGE_SDL3_MIXER=y
+BR2_PACKAGE_SDL3_TTF=y
+BR2_PACKAGE_OPENAL=y
+BR2_PACKAGE_LIBOGG=y
+BR2_PACKAGE_LIBVORBIS=y
+BR2_PACKAGE_LIBTHEORA=y
+BR2_PACKAGE_FREETYPE=y
+BR2_PACKAGE_LIBPNG=y
+BR2_PACKAGE_JPEG=y
+BR2_PACKAGE_ZLIB=y
+BR2_PACKAGE_XZ=y
+BR2_PACKAGE_BZIP2=y

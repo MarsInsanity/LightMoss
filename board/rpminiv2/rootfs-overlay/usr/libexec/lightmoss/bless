@@ -1,0 +1,46 @@
+#!/bin/sh
+# Once spruce has started: this system copy works, so keep its boot entry.
+#
+# OpenABL counts down the tries of an entry named lightmoss-N+<left>-<done>.conf
+# (Boot Loader Specification boot counting, as systemd-boot does); renaming it
+# lightmoss-N.conf marks it good for good.
+#
+# If loader.conf's default is the other copy's entry and that entry has no
+# tries left, the copy an update wrote never started and OpenABL fell back to
+# this one: put this one back as the default, drop the failed entry and tell
+# the update app (/boot/lightmoss-update-failed). A default that still has
+# tries, or is a kept entry, means this copy was picked by hand in OpenABL's
+# menu: nothing changes.
+. /usr/libexec/lightmoss/lib.sh
+
+slot="$(lm_slot)"
+case "$slot" in 1|2) ;; *) exit 0 ;; esac
+mountpoint -q /boot || exit 0
+E=/boot/loader/entries
+changed=0
+
+for f in "$E"/lightmoss-"$slot"+*.conf; do
+	[ -e "$f" ] || continue
+	mv -f "$f" "$E/lightmoss-$slot.conf" && changed=1
+	echo "lightmoss-bless: system copy $slot kept (${f##*/})"
+done
+
+default="$(sed -n 's/^default[[:space:]]*//p' /boot/loader/loader.conf 2>/dev/null)"
+if [ -n "$default" ] && [ "$default" != "lightmoss-$slot.conf" ]; then
+	other="${default%.conf}"
+	for f in "$E/$other"+0-*.conf; do
+		[ -e "$f" ] || continue
+		echo "lightmoss-bless: ${f##*/} ran out of tries, back to system copy $slot"
+		pending="$(cat /boot/lightmoss-update-pending 2>/dev/null)"
+		echo "LightMoss ${pending:-update} did not start; system copy $slot ($(sed -n 's/^LIGHTMOSS_VERSION="\(.*\)"/\1/p' /etc/os-release)) kept." > /boot/lightmoss-update-failed
+		rm -f "$f"
+		printf 'default lightmoss-%s.conf\ntimeout 0\n' "$slot" > /boot/loader/loader.conf.new
+		mv -f /boot/loader/loader.conf.new /boot/loader/loader.conf
+		rm -f /boot/lightmoss-update-pending
+		changed=1
+	done
+else
+	[ -e /boot/lightmoss-update-pending ] && { rm -f /boot/lightmoss-update-pending; changed=1; }
+fi
+[ "$changed" = 1 ] && sync
+exit 0

@@ -1,0 +1,223 @@
+#!/bin/sh
+# Put the running LightMoss (booted from a card) on the internal storage, next
+# to Android.
+#
+#   lightmoss-install-internal [-y] [--replace]
+#
+# Android keeps its own partitions. Its userdata, the last partition of the
+# internal storage, gives up its last 4 GiB to LightMoss's three partitions,
+# the layout OpenABL knows as a Linux install ("Uninstall CFW" in its menu
+# gives the space back):
+#
+#   LMBOOT  256 MiB   FAT32: OpenABL's boot entries, the kernels, the flags
+#   LMSYS1  ~1.9 GiB  system copy 1 (this system, copied)
+#   LMSYS2  ~1.9 GiB  system copy 2 (where the next update goes)
+#
+# ANDROID'S DATA IS LOST: userdata changes size, so Android must format it
+# (apps, settings and everything in its internal storage). On its next start
+# Android offers to (or use OpenABL's Recovery mode and wipe data).
+#
+# Again on a device that has LightMoss on its internal storage, it repairs it:
+# system copy 1 becomes this system, and the next start boots it. Android and
+# the partition table are left alone.
+#
+# Partitions of another system behind userdata (ROCKNIX's, say) are only
+# replaced with --replace; userdata is then sized to leave LightMoss its 4 GiB.
+#
+# Run as root from a LightMoss card. With -y it does not ask. The
+# lightmoss-install-internal service runs it when the card's boot partition
+# holds a file named lightmoss-install (and the charger is connected).
+set -eu
+. /usr/libexec/lightmoss/lib.sh
+
+die() { echo "lightmoss-install-internal: $*" >&2; exit 1; }
+say() { echo "$*"; [ "$from_flag" = 0 ] || lm_say "Installing LightMoss on the internal storage\n\n  $*"; }
+
+yes=0; replace=0; from_flag=0
+for a in "$@"; do
+	case "$a" in
+		-y) yes=1 ;;
+		--replace) replace=1 ;;
+		--from-flag) yes=1; from_flag=1 ;;
+		*) die "usage: lightmoss-install-internal [-y] [--replace]" ;;
+	esac
+done
+
+LM_SIZE_MB=4096
+BOOT_SIZE_MB=256
+TYPE_DATA=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
+TYPE_LINUX=0FC63DAF-8483-4772-8E79-3D69D8477DE4
+BOOTFILES=/usr/share/lightmoss/boot
+
+root="$(lm_root_disk)" || die "cannot tell which disk / is on"
+[ "$(lm_disk_type "$root")" = SD ] || die "this system runs from the internal storage: boot a LightMoss card to install or repair"
+[ -d "$BOOTFILES" ] || die "this system has no boot files ($BOOTFILES)"
+grep -q 'retroidpocket,rpminiv2' /proc/device-tree/compatible 2>/dev/null ||
+	die "this is not a Retroid Pocket Mini V2"
+int="$(lm_internal_disk)" || die "no Android userdata partition on the internal storage"
+dev="/dev/$int"
+ss="$(blockdev --getss "$dev")"
+mb=$(( 1048576 / ss ))          # sectors per MiB
+ud="$(lm_part_named "$int" userdata)"
+udk="${ud#/dev/}"
+udn="$(cat "/sys/class/block/$udk/partition")"
+# sysfs counts 512-byte sectors; sfdisk the disk's own.
+ud_start=$(( $(cat "/sys/class/block/$udk/start") * 512 / ss ))
+ud_size=$(( $(cat "/sys/class/block/$udk/size") * 512 / ss ))
+
+lmboot="$(lm_part_named "$int" LMBOOT || true)"
+lmsys1="$(lm_part_named "$int" LMSYS1 || true)"
+lmsys2="$(lm_part_named "$int" LMSYS2 || true)"
+
+# Partitions behind userdata that are not LightMoss's.
+others=""
+for p in /sys/block/"$int"/"$int"*; do
+	[ -e "$p/partition" ] || continue
+	k="${p##*/}"
+	[ $(( $(cat "$p/start") * 512 / ss )) -gt "$ud_start" ] || continue
+	case "$(lm_part_name "$k")" in LMBOOT|LMSYS1|LMSYS2) continue ;; esac
+	others="$others $(cat "$p/partition")"
+done
+
+if [ -n "$lmboot" ] && [ -n "$lmsys1" ] && [ -n "$lmsys2" ] && [ -z "$others" ]; then
+	mode=repair
+elif [ -n "$others" ] || [ -n "$lmboot$lmsys1$lmsys2" ]; then
+	[ "$replace" = 1 ] || die "the internal storage has partitions behind Android's userdata that are not a complete LightMoss install (another system's?): --replace removes them"
+	mode=install
+else
+	mode=install
+fi
+
+if [ "$yes" = 0 ]; then
+	if [ "$mode" = repair ]; then
+		echo "This repairs LightMoss on the internal storage ($dev): system copy 1"
+		echo "becomes this system, and the next start boots it. Android is not touched."
+	else
+		echo "This installs LightMoss on the internal storage ($dev), in the last"
+		echo "$LM_SIZE_MB MiB of Android's userdata (partition $udn)."
+		[ -n "$others" ] && echo "Partitions$others behind userdata are REMOVED."
+		echo "ANDROID'S DATA (apps, settings, its internal storage) WILL BE LOST:"
+		echo "Android must format userdata on its next start."
+	fi
+	printf 'Type "yes" to continue: '
+	read -r answer
+	[ "$answer" = yes ] || die "cancelled"
+fi
+
+for m in $(awk -v d="$dev" 'index($1, d) == 1 { print $2 }' /proc/mounts); do
+	umount "$m" || die "cannot unmount $m"
+done
+
+if [ "$mode" = install ]; then
+	say "1/5 partitions"
+	for n in $others; do
+		sfdisk --no-reread --no-tell-kernel --delete "$dev" "$n" >/dev/null
+	done
+	for k in "$lmboot" "$lmsys1" "$lmsys2"; do
+		[ -n "$k" ] || continue
+		sfdisk --no-reread --no-tell-kernel --delete "$dev" "$(cat "/sys/class/block/${k#/dev/}/partition")" >/dev/null
+	done
+	# LightMoss takes the last LM_SIZE_MB MiB before the backup GPT.
+	last="$(sfdisk -d "$dev" | sed -n 's/^last-lba: *//p')"
+	[ -n "$last" ] || die "cannot read the partition table's last usable sector"
+	lm_start=$(( (last + 1 - LM_SIZE_MB * mb) / mb * mb ))
+	new_ud_size=$(( lm_start - ud_start ))
+	[ "$new_ud_size" -ge $(( 4096 * mb )) ] || die "userdata would be left with less than 4 GiB"
+	boot_size=$(( BOOT_SIZE_MB * mb ))
+	sys_size=$(( (last + 1 - lm_start - boot_size) / 2 / mb * mb ))
+	# Stock tables may have no free entries for three more partitions.
+	cap="$(sgdisk -p "$dev" 2>/dev/null | sed -n 's/.*holds up to \([0-9]*\) entries.*/\1/p')"
+	maxn="$(sfdisk -d "$dev" | sed -n "s|^$dev\([0-9]*\) .*|\1|p" | sort -n | tail -n 1)"
+	if [ -n "$cap" ] && [ "$cap" -lt $(( maxn + 3 )) ]; then
+		sgdisk --resize-table=128 "$dev" >/dev/null || die "cannot grow the partition table"
+	fi
+	if [ "$new_ud_size" != "$ud_size" ]; then
+		echo ",$new_ud_size" | sfdisk --no-reread --no-tell-kernel -N "$udn" "$dev" >/dev/null ||
+			die "cannot resize userdata"
+	fi
+	sfdisk --append --no-reread --no-tell-kernel "$dev" >/dev/null <<SFDISK || die "cannot add LightMoss's partitions"
+start=$lm_start, size=$boot_size, type=$TYPE_DATA, name=LMBOOT, uuid=$(cat /proc/sys/kernel/random/uuid)
+start=$(( lm_start + boot_size )), size=$sys_size, type=$TYPE_LINUX, name=LMSYS1, uuid=$(cat /proc/sys/kernel/random/uuid)
+start=$(( lm_start + boot_size + sys_size )), size=$sys_size, type=$TYPE_LINUX, name=LMSYS2, uuid=$(cat /proc/sys/kernel/random/uuid)
+SFDISK
+	blockdev --rereadpt "$dev" 2>/dev/null || partx --update "$dev"
+	udevadm settle 2>/dev/null || sleep 2
+	lmboot="$(lm_part_named "$int" LMBOOT)" || die "LMBOOT did not appear"
+	lmsys1="$(lm_part_named "$int" LMSYS1)" || die "LMSYS1 did not appear"
+	lmsys2="$(lm_part_named "$int" LMSYS2)" || die "LMSYS2 did not appear"
+	if [ "$new_ud_size" != "$ud_size" ]; then
+		# userdata changed size: what is in it no longer fits it. Its start
+		# is cleared, so Android formats it rather than tries to mount it.
+		dd if=/dev/zero of="$ud" bs=1M count=8 conv=fsync 2>/dev/null
+	fi
+else
+	say "1/5 partitions: kept"
+fi
+
+mnt="$(mktemp -d)"
+trap 'umount "$mnt/boot" "$mnt/root" "$mnt/src" "$mnt/old" 2>/dev/null; rmdir "$mnt/boot" "$mnt/root" "$mnt/src" "$mnt/old" "$mnt/keep" 2>/dev/null; rm -rf "$mnt/keep"; rmdir "$mnt" 2>/dev/null' EXIT
+mkdir -p "$mnt/boot" "$mnt/root" "$mnt/src" "$mnt/old" "$mnt/keep"
+
+if [ "$mode" = repair ]; then
+	# The installed system's identity: machine ID (its journal), SSH host keys.
+	if mount -o ro "$lmsys1" "$mnt/old" 2>/dev/null; then
+		cp -a "$mnt/old/etc/machine-id" "$mnt/keep/" 2>/dev/null || true
+		[ -d "$mnt/old/etc/dropbear" ] && cp -a "$mnt/old/etc/dropbear" "$mnt/keep/"
+		umount "$mnt/old"
+	fi
+fi
+
+say "2/5 LMBOOT"
+if [ "$mode" = install ]; then
+	mkfs.vfat -F 32 -n LMBOOT "$lmboot" >/dev/null
+fi
+mount -t vfat "$lmboot" "$mnt/boot"
+mkdir -p "$mnt/boot/loader/entries"
+rm -rf "$mnt/boot/lightmoss-1"
+mkdir -p "$mnt/boot/lightmoss-1"
+cp "$BOOTFILES"/* "$mnt/boot/lightmoss-1/"
+for f in /boot/README-LightMoss.txt /boot/headphones-invert; do
+	[ -e "$f" ] && cp "$f" "$mnt/boot/"
+done
+rm -f "$mnt/boot/loader/entries"/lightmoss-1*.conf
+partuuid="$(blkid -o value -s PARTUUID "$lmsys1")"
+[ -n "$partuuid" ] || die "LMSYS1 has no PARTUUID"
+/usr/libexec/lightmoss/boot-entry 1 "$partuuid" "$(sed -n 's/^LIGHTMOSS_VERSION="\(.*\)"/\1/p' /etc/os-release)" \
+	> "$mnt/boot/loader/entries/lightmoss-1.conf"
+printf 'default lightmoss-1.conf\ntimeout 0\n' > "$mnt/boot/loader/loader.conf"
+
+say "3/5 system copy 1 (this takes a few minutes)"
+mkfs.ext4 -q -F -L LIGHTMOSS "$lmsys1"
+mount "$lmsys1" "$mnt/root"
+# A plain (non-recursive) bind mount shows the root filesystem alone, with
+# /boot, /proc, /mnt/SDCARD... as the empty directories they are underneath.
+mount --bind / "$mnt/src"
+cp -a "$mnt/src/." "$mnt/root/"
+umount "$mnt/src"
+rm -rf "$mnt/root/var/log/journal/"*
+mkdir -p "$mnt/root/var/lib/lightmoss"
+touch "$mnt/root/var/lib/lightmoss/firstboot.done"
+if [ -e "$mnt/keep/machine-id" ]; then
+	cp -a "$mnt/keep/machine-id" "$mnt/root/etc/machine-id"
+else
+	: > "$mnt/root/etc/machine-id"
+fi
+rm -rf "$mnt/root/etc/dropbear"
+if [ -d "$mnt/keep/dropbear" ]; then
+	cp -a "$mnt/keep/dropbear" "$mnt/root/etc/dropbear"
+else
+	mkdir -p "$mnt/root/etc/dropbear"
+fi
+
+say "4/5 system copy 2"
+if [ "$mode" = install ]; then
+	# Empty until the first update writes it.
+	mkfs.ext4 -q -F -L LIGHTMOSS2 "$lmsys2"
+fi
+
+say "5/5 syncing"
+sync
+echo "Done. LightMoss is on the internal storage."
+echo "OpenABL boots it with the boot source on Auto (internal storage first) or Internal."
+[ "$mode" = install ] && echo "Android formats its userdata on its next start (or wipe data from OpenABL's Recovery mode)."
+exit 0

@@ -1,0 +1,13 @@
+config BR2_PACKAGE_OPENABL
+	bool "openabl"
+	depends on BR2_aarch64
+	help
+	  OpenABL, the Open Handheld Collective's build of Qualcomm's
+	  Android bootloader (ABL) with a boot menu and standard Linux
+	  boot (Boot Loader Specification entries on FAT partitions),
+	  for the SM8250. Nothing goes in the root filesystem: the
+	  signed image (abl_signed-SM8250.elf) goes to
+	  $(BINARIES_DIR)/openabl, from where post-image puts it on the
+	  card's boot partition, for installing.
+
+	  https://github.com/OpenHandheldCollective/OpenABL

@@ -1,0 +1,22 @@
+#!/bin/sh
+# Print the Boot Loader Specification entry OpenABL boots system copy SLOT
+# with: boot-entry SLOT PARTUUID VERSION > /boot/loader/entries/lightmoss-SLOT.conf
+#
+# SLOT is 1 or 2 (the internal storage's LMSYS1/LMSYS2) or sd (a card's LMSYS).
+# The files are those of /usr/share/lightmoss/boot, copied to /lightmoss-SLOT
+# on LMBOOT: the kernel (started through its EFI stub), the device tree, and
+# an initramfs that only carries firmware (no /init: the kernel mounts root=
+# itself, after the remote processors found their firmware in it).
+slot="$1"; partuuid="$2"; version="${3:-unknown}"
+case "$slot" in
+	1|2) title="LightMoss $version (system $slot)" ;;
+	*)   title="LightMoss $version (card)" ;;
+esac
+cat <<EOF
+title      $title
+version    $version
+linux      /lightmoss-$slot/Image
+initrd     /lightmoss-$slot/firmware.cpio.gz
+devicetree /lightmoss-$slot/sm8250-retroidpocket-rpminiv2.dtb
+options    root=PARTUUID=$partuuid rootfstype=ext4 rootwait rw quiet console=tty0 video=efifb:off gpt lightmoss.slot=$slot
+EOF

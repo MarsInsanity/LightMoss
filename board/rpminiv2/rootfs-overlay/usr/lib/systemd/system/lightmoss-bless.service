@@ -1,0 +1,13 @@
+[Unit]
+Description=Keep this system copy's boot entry once spruce has started
+After=spruce-launch.service lightmoss-boot.service
+Requires=lightmoss-boot.service
+
+[Service]
+Type=oneshot
+# spruce's runtime.sh has been started; give it a moment to show it runs.
+ExecStartPre=/bin/sleep 20
+ExecStart=/usr/libexec/lightmoss/bless
+
+[Install]
+WantedBy=multi-user.target
