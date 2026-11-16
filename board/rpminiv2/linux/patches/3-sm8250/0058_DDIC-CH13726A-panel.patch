@@ -4,6 +4,9 @@ Date: Mon, 27 Oct 2025 16:53:15 +0800
 Subject: [PATCH] drm/panel: Add panel driver for DDIC CH13726A based panels
 
 Signed-off-by: Teguh Sobirin <teguh@sobir.in>
+
+(LightMoss: refreshed against Linux 7.2 so it applies without fuzz, as buildroot applies patches; the changes are ROCKNIX's.)
+
 ---
  drivers/gpu/drm/panel/Kconfig               |  11 +
  drivers/gpu/drm/panel/Makefile              |   1 +
@@ -12,10 +15,10 @@ Signed-off-by: Teguh Sobirin <teguh@sobir.in>
  create mode 100644 drivers/gpu/drm/panel/panel-ddic-ch13726a.c
 
 diff --git a/drivers/gpu/drm/panel/Kconfig b/drivers/gpu/drm/panel/Kconfig
-index cc2b93322628..fd889664ff6b 100644
+index dc2d6098c..5d49e58de 100644
 --- a/drivers/gpu/drm/panel/Kconfig
 +++ b/drivers/gpu/drm/panel/Kconfig
-@@ -126,6 +126,17 @@ config DRM_PANEL_CHIPONE_ICNA35XX
+@@ -128,6 +128,17 @@ config DRM_PANEL_CHIPONE_ICNA35XX
  	  around the Chipone ICNA3512 and ICNA3520 display controllers,
  	  such as some Tianma panels used in AYN Odin2 Portal and Thor.
  
@@ -32,13 +35,12 @@ index cc2b93322628..fd889664ff6b 100644
 +
  config DRM_PANEL_EBBG_FT8719
  	tristate "EBBG FT8719 panel driver"
- 	depends on OF
+ 	depends on GPIOLIB
 diff --git a/drivers/gpu/drm/panel/Makefile b/drivers/gpu/drm/panel/Makefile
-index 339a5cb9f31b..c5f4f5f7bd82 100644
+index d39a8f82f..0219f98c0 100644
 --- a/drivers/gpu/drm/panel/Makefile
 +++ b/drivers/gpu/drm/panel/Makefile
-@@ -10,6 +10,7 @@ obj-$(CONFIG_DRM_PANEL_BOE_TH101MB31UIG002_28A) += panel-boe-th101mb31ig002-28a.o
- obj-$(CONFIG_DRM_PANEL_BOE_TV101WUM_LL2) += panel-boe-tv101wum-ll2.o
+@@ -11,6 +11,7 @@ obj-$(CONFIG_DRM_PANEL_BOE_TV101WUM_LL2) += panel-boe-tv101wum-ll2.o
  obj-$(CONFIG_DRM_PANEL_BOE_TV101WUM_NL6) += panel-boe-tv101wum-nl6.o
  obj-$(CONFIG_DRM_PANEL_CHIPONE_ICNA35XX) += panel-chipone-icna35xx.o
  obj-$(CONFIG_DRM_PANEL_CHIPWEALTH_CH13726A) += panel-chipwealth-ch13726a.o
@@ -48,7 +50,7 @@ index 339a5cb9f31b..c5f4f5f7bd82 100644
  obj-$(CONFIG_DRM_PANEL_SIMPLE) += panel-simple.o
 diff --git a/drivers/gpu/drm/panel/panel-ddic-ch13726a.c b/drivers/gpu/drm/panel/panel-ddic-ch13726a.c
 new file mode 100644
-index 000000000000..946ad32f9b82
+index 000000000..d58cd2066
 --- /dev/null
 +++ b/drivers/gpu/drm/panel/panel-ddic-ch13726a.c
 @@ -0,0 +1,326 @@
@@ -378,7 +380,3 @@ index 000000000000..946ad32f9b82
 +module_mipi_dsi_driver(ch13726a_driver);
 +
 +MODULE_DESCRIPTION("DRM driver for CH13726A DSI panels");
-+MODULE_LICENSE("GPL");
--- 
-2.34.1
-
