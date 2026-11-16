@@ -20,4 +20,5 @@ config BR2_LIGHTMOSS_LIB32
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/alsa-ucm-conf/Config.in"
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/lightmoss-firmware-sm8250/Config.in"
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/openabl/Config.in"
+	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/lightmoss-volkeys/Config.in"
 endmenu

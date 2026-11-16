@@ -1,0 +1,4 @@
+#!/bin/sh
+# Exits 0 while headphones are plugged in (lightmoss-audio's jack state), 1
+# otherwise: for spruce's PyUI (HEADPHONES_STATUS_CMD), which runs it without a shell.
+[ "$(cat /run/lightmoss/headphones 2>/dev/null)" = 1 ]

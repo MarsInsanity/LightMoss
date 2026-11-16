@@ -19,7 +19,7 @@ from the card, through the Mini V2 platform of the spruce fork
 | Firmware | The files ROCKNIX installs for SM8250, from linux-firmware 20260309 (`package/lightmoss-firmware-sm8250`). The DSPs' firmware also comes in a small initramfs with no `/init`, since they start before the root filesystem is mounted. |
 | Display | The panel scans out portrait (1080x1240) and is mounted landscape (`rotation = <90>`). LightMoss's SDL2 (64- and 32-bit) turns the primary plane 270 degrees on the SDE rotator (ROCKNIX's DPU patches) and shows programs a 1240x1080 display (`board/rpminiv2/patches/sdl2`), as dArkMoss's SDL does with RGA on the E5 Plus. PyUI (spruce's own SDL) turns its canvas itself. SDL3 is not turned yet. `SDL_KMSDRM_PANEL_ROTATION=0` turns it off for a test. |
 | Audio | ROCKNIX's Retroid UCM configuration (alsa-ucm-conf 1.2.14 + ROCKNIX's patches); `lightmoss-audio` routes `hw:0,0` to the speakers or the headphones, following the jack, and writes `/run/lightmoss/headphones` for spruce. |
-| Input | ROCKNIX's Retroid gamepad driver (the MCU on a UART), power and volume keys. |
+| Input | ROCKNIX's Retroid gamepad driver (the MCU on a UART), power key; the volume rocker's two keys (gpio-keys and the PMIC's resin) merged into one input device, "LightMoss Volume Keys" (`package/lightmoss-volkeys`), since spruce watches one node. |
 | Not yet | Bluetooth (the QCA6390's; spruce's platform does not offer it), Vulkan, SDL3 rotation, the RGB stick LEDs, the fan curve, USB gadget mode. |
 
 ## Partitions
