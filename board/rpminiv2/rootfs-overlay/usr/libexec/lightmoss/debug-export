@@ -1,0 +1,64 @@
+#!/bin/sh
+# With /boot/lightmoss-debug present, write readable logs to /boot/logs, where
+# a PC can read them (off the card; on the internal storage, over SSH or from
+# a card's LightMoss). Off by default: an unclean power-off while /boot is
+# being written can dirty the FAT partition OpenABL boots from.
+FLAG=/boot/lightmoss-debug
+LOGDIR=/boot/logs
+KEEP=5
+
+[ -e "$FLAG" ] || exit 0
+mountpoint -q /boot || exit 0
+
+STAMP=$(date +%Y%m%d-%H%M%S 2>/dev/null) || STAMP=unknown
+OUT="$LOGDIR/$STAMP"
+mkdir -p "$OUT" || exit 0
+
+journalctl -b -1 --no-pager > "$OUT/previous-boot.log" 2>/dev/null
+journalctl -b 0 --no-pager  > "$OUT/this-boot.log"     2>/dev/null
+dmesg                       > "$OUT/dmesg.log"         2>/dev/null
+{
+	echo "date:    $(date 2>/dev/null)"
+	echo "kernel:  $(uname -a 2>/dev/null)"
+	echo "cmdline: $(cat /proc/cmdline)"
+	echo "uptime:  $(uptime 2>/dev/null)"
+	echo
+	# (A debug boot is slower than a plain one: the kernel and systemd print
+	# on the screen.)
+	echo "--- boot timing (seconds since the kernel started)"
+	us() { awk -v v="$1" -v l="$2" 'BEGIN { if (v > 0) printf "%8.3f  %s\n", v / 1000000, l }'; }
+	us "$(systemctl show -P UserspaceTimestampMonotonic)" "systemd started (root mounted)"
+	for u in sysinit.target basic.target NetworkManager.service multi-user.target; do
+		us "$(systemctl show -P ActiveEnterTimestampMonotonic "$u")" "$u up"
+	done
+	us "$(systemctl show -P InactiveExitTimestampMonotonic spruce-launch.service)" "spruce hand-off starts (mount-spruce)"
+	us "$(systemctl show -P ExecMainStartTimestampMonotonic spruce-launch.service)" "spruce's runtime.sh starts"
+	us "$(systemctl show -P FinishTimestampMonotonic)" "boot jobs all done"
+	echo
+	echo "--- os-release"; cat /etc/os-release
+	echo; echo "--- block devices"; lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINT
+	echo; echo "--- mounts"; mount
+	echo; echo "--- disk"; df -h
+	echo; echo "--- failed units"; systemctl --failed --no-pager
+	echo; echo "--- network"; ip addr; nmcli general 2>&1; nmcli device 2>&1
+	echo; echo "--- usb"; lsusb 2>&1
+	echo; echo "--- sound"; cat /proc/asound/cards; amixer controls 2>&1 | head -40
+	echo; echo "--- input"; cat /proc/bus/input/devices
+	echo; echo "--- suspend"; echo "states: $(cat /sys/power/state)"
+	cat /sys/kernel/debug/suspend_stats 2>&1
+	echo; echo "--- wakeup sources"; cat /sys/kernel/debug/wakeup_sources 2>&1 | awk 'NR == 1 || $2 > 0'
+	echo; echo "--- boot entries"; cat /boot/loader/loader.conf 2>&1; ls -l /boot/loader/entries 2>&1
+	echo; echo "--- partitions"; sfdisk -l 2>&1
+	echo; echo "--- drm"; cat /sys/class/drm/card*-DSI-*/modes 2>&1; ls /sys/class/backlight 2>&1
+	echo; echo "--- power supplies"; for p in /sys/class/power_supply/*; do echo "$p: $(cat "$p/type" "$p/online" "$p/capacity" "$p/status" 2>/dev/null | tr '\n' ' ')"; done
+	echo; echo "--- remote processors"; for r in /sys/class/remoteproc/*; do echo "$r: $(cat "$r/name" "$r/state" 2>/dev/null | tr '\n' ' ')"; done
+} > "$OUT/system.txt" 2>&1
+
+[ -f /mnt/SDCARD/Saves/spruce/spruce.log ] && cp -f /mnt/SDCARD/Saves/spruce/spruce.log "$OUT/" 2>/dev/null
+
+[ -f /boot/lightmoss-install.log ] && cp -f /boot/lightmoss-install.log "$OUT/" 2>/dev/null
+
+ls -1d "$LOGDIR"/*/ 2>/dev/null | sort | head -n "-$KEEP" | while read -r old; do
+	rm -rf "$old"
+done
+sync

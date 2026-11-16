@@ -1,0 +1,10 @@
+config BR2_PACKAGE_LIGHTMOSS_FIRMWARE_SM8250
+	bool "lightmoss-firmware-sm8250"
+	depends on BR2_aarch64
+	help
+	  The SM8250 firmware the Retroid Pocket Mini V2 needs, the
+	  files ROCKNIX installs for its SM8250 devices
+	  (projects/ROCKNIX/devices/SM8250/config/kernel-firmware.dat):
+	  Adreno 650 (GMU, SQE, zap shader), the audio, compute and
+	  sensor DSPs, the video decoder, QCA6390 Wi-Fi (ath11k) and
+	  Bluetooth. From linux-firmware, in /usr/lib/firmware.

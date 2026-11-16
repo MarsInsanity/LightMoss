@@ -1,0 +1,16 @@
+[Unit]
+Description=Install LightMoss on the internal storage (once, when LMBOOT holds lightmoss-install)
+# Only from a card, and only when asked: a file named lightmoss-install (or
+# lightmoss-install.txt, as a PC may name it) on the card's boot partition.
+ConditionPathExistsGlob=/boot/lightmoss-install*
+After=lightmoss-boot.service local-fs.target systemd-udev-trigger.service lightmoss-firstboot.service
+Before=spruce-launch.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/lightmoss/install-internal-from-flag
+TimeoutStartSec=30min
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target

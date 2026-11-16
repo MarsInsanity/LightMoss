@@ -1,0 +1,15 @@
+[Unit]
+Description=Mount LMBOOT (the system disk's boot partition) at /boot
+DefaultDependencies=no
+After=systemd-remount-fs.service
+Before=local-fs.target umount.target
+Conflicts=umount.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/lightmoss/mount-boot
+ExecStop=/bin/umount /boot
+
+[Install]
+WantedBy=local-fs.target

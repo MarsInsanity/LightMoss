@@ -1,0 +1,14 @@
+config BR2_PACKAGE_ALSA_UCM_CONF
+	bool "alsa-ucm-conf"
+	depends on BR2_PACKAGE_ALSA_LIB
+	select BR2_PACKAGE_ALSA_LIB_UCM
+	help
+	  ALSA's Use Case Manager configurations (/usr/share/alsa/ucm2),
+	  with ROCKNIX's Retroid Pocket SM8250 sound card configuration:
+	  how the codecs are switched on for the speakers, the headphones
+	  and the headset microphone.
+
+	  https://github.com/alsa-project/alsa-ucm-conf
+
+comment "alsa-ucm-conf needs alsa-lib"
+	depends on !BR2_PACKAGE_ALSA_LIB

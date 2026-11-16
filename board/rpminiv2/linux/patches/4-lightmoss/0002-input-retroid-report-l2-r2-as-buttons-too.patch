@@ -1,0 +1,46 @@
+From f42d3fe1c5e2c420801ace81fc50759587baddcc Mon Sep 17 00:00:00 2001
+From: LightMoss <noreply@github.com>
+Date: Mon, 16 Nov 2026 09:12:18 +0000
+Subject: [PATCH] input: retroid: report L2/R2 as buttons too
+
+The Retroid gamepad's triggers are analog only (ABS_HAT2X/ABS_HAT2Y).
+spruce and most emulator front ends expect L2/R2 as buttons, as on
+every other handheld they run on, so also report BTN_TL2/BTN_TR2,
+pressed past half travel. The analog axes are unchanged.
+
+---
+ drivers/input/joystick/retroid.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/input/joystick/retroid.c b/drivers/input/joystick/retroid.c
+index 375e7d421..7000a1cf9 100644
+--- a/drivers/input/joystick/retroid.c
++++ b/drivers/input/joystick/retroid.c
+@@ -253,10 +253,14 @@ static void gamepad_input_handler(struct gamepad_device *dev,
+ 	value = (int16_t)(trigger_left_max - (data->data[2] | (data->data[3] << 8)));
+ 	input_report_abs(indev, ABS_HAT2X,
+ 			 ( value < trigger_left_deadzone )? 0 : value - trigger_left_antideadzone);
++	input_report_key(indev, BTN_TL2,
++			 value > (trigger_left_max - trigger_left_antideadzone) / 2);
+ 
+ 	value = (int16_t)(trigger_right_max - (data->data[4] | (data->data[5] << 8)));
+ 	input_report_abs(indev, ABS_HAT2Y,
+ 			 ( value < trigger_right_deadzone )? 0 : value - trigger_right_antideadzone);
++	input_report_key(indev, BTN_TR2,
++			 value > (trigger_right_max - trigger_right_antideadzone) / 2);
+ 
+ 	value = -(int16_t)(data->data[6] | (data->data[7] << 8));
+ 	value += axis_leftx_center;
+@@ -456,6 +460,9 @@ static int gamepad_mcu_uart_probe(struct serdev_device *serdev)
+ 	__set_bit(EV_KEY, gamepad_dev->dev_input->evbit);
+ 	for (int i = 0; i < ARRAY_SIZE(keymap); i++)
+ 		input_set_capability(gamepad_dev->dev_input, EV_KEY, keymap[i]);
++	/* L2/R2 are analog; LightMoss also reports them as buttons. */
++	input_set_capability(gamepad_dev->dev_input, EV_KEY, BTN_TL2);
++	input_set_capability(gamepad_dev->dev_input, EV_KEY, BTN_TR2);
+ 
+ 	__set_bit(EV_ABS, gamepad_dev->dev_input->evbit);
+ 
+-- 
+2.43.0
+

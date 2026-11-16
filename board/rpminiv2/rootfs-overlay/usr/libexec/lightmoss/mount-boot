@@ -1,0 +1,13 @@
+#!/bin/sh
+# Mount LMBOOT, the boot partition on the disk the root filesystem is on, at
+# /boot. By disk and GPT name, so an internal install and a LightMoss card
+# (both have an LMBOOT) each mount their own.
+. /usr/libexec/lightmoss/lib.sh
+
+mountpoint -q /boot && exit 0
+disk="$(lm_root_disk)" || { echo "cannot tell which disk / is on" >&2; exit 1; }
+dev="$(lm_part_named "$disk" LMBOOT)" || { echo "no LMBOOT partition on $disk" >&2; exit 1; }
+# A dirty FAT (power pulled while it was being written) is repaired before it
+# gets any worse: OpenABL boots from this partition.
+fsck.fat -a -w "$dev" >/dev/null 2>&1
+mount -t vfat -o rw,noatime "$dev" /boot

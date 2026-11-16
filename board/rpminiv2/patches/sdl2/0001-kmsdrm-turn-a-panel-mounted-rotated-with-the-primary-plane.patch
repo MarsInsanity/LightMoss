@@ -1,0 +1,322 @@
+From: LightMoss <noreply@github.com>
+Subject: [PATCH] kmsdrm: turn a panel mounted rotated with the primary plane
+
+The Retroid Pocket Mini V2's AMOLED panel scans out portrait (1080x1240)
+and is mounted landscape; its device tree says so ("rotation = <90>"),
+which the kernel reports as the connector's "panel orientation" (Right
+Side Up). The kernel's console turns its text to match; nothing turns
+what a KMS/DRM program shows, so every SDL program came out sideways.
+
+Where the CRTC's primary plane can rotate (with ROCKNIX's SDE rotator
+patches the SM8250's planes offer 90 and 270), turn it by the panel's
+orientation, as the kernel's fbdev emulation does for 0 and 180, and
+show SDL programs the display with its sides swapped (1240x1080): they
+render into buffers of that size, which the plane scans out turned.
+The plane is turned upright again before the console's CRTC
+configuration is restored, so the next program finds it as it was
+(the kernel's fbdev restore also resets it).
+
+SDL_KMSDRM_PANEL_ROTATION=0 leaves the panel alone; 90, 180 or 270
+turn it by that many degrees (counter-clockwise, as DRM counts).
+
+On displays without a "panel orientation", or one that says Normal,
+nothing changes.
+---
+diff --git a/src/video/kmsdrm/SDL_kmsdrmvideo.c b/src/video/kmsdrm/SDL_kmsdrmvideo.c
+index 8f080c2..69a01f0 100644
+--- a/src/video/kmsdrm/SDL_kmsdrmvideo.c
++++ b/src/video/kmsdrm/SDL_kmsdrmvideo.c
+@@ -713,6 +713,181 @@ static SDL_bool KMSDRM_CrtcGetVrr(uint32_t drm_fd, uint32_t crtc_id)
+ 
+ /* Gets a DRM connector, builds an SDL_Display with it, and adds it to the
+    list of SDL Displays in _this->displays[]  */
++#ifndef DRM_MODE_ROTATE_0
++#define DRM_MODE_ROTATE_0   (1 << 0)
++#define DRM_MODE_ROTATE_90  (1 << 1)
++#define DRM_MODE_ROTATE_180 (1 << 2)
++#define DRM_MODE_ROTATE_270 (1 << 3)
++#endif
++#ifndef DRM_PLANE_TYPE_PRIMARY
++#define DRM_PLANE_TYPE_PRIMARY 1
++#endif
++
++/* Panel rotation (LightMoss).
++ *
++ * A panel mounted rotated reports it in its connector's "panel orientation"
++ * property (from the device tree's "rotation"). The kernel's own console
++ * turns its text to match; nothing turns what a KMS/DRM program shows. Where
++ * the CRTC's primary plane can rotate (a "rotation" property offering the
++ * angle), turn it, the same way the kernel's fbdev emulation would for 0 and
++ * 180 degrees: Left Side Up -> 90, Upside Down -> 180, Right Side Up -> 270.
++ * For 90 and 270 SDL then shows the display with its sides swapped, renders
++ * into buffers of that size, and the plane scans them out turned.
++ *
++ * SDL_KMSDRM_PANEL_ROTATION overrides it: "0" leaves the panel alone,
++ * "90", "180" or "270" turns the plane by that many degrees (counter-
++ * clockwise, as DRM counts) whatever the connector says.
++ */
++static uint64_t KMSDRM_PanelOrientationRotation(int drm_fd, uint32_t connector_id)
++{
++    drmModeObjectPropertiesPtr props;
++    uint64_t rotation = DRM_MODE_ROTATE_0;
++    uint32_t i;
++    int j;
++
++    props = KMSDRM_drmModeObjectGetProperties(drm_fd, connector_id, DRM_MODE_OBJECT_CONNECTOR);
++    if (!props) {
++        return rotation;
++    }
++    for (i = 0; i < props->count_props; i++) {
++        drmModePropertyPtr prop = KMSDRM_drmModeGetProperty(drm_fd, props->props[i]);
++        if (!prop) {
++            continue;
++        }
++        if (SDL_strcmp(prop->name, "panel orientation") == 0 && (prop->flags & DRM_MODE_PROP_ENUM)) {
++            for (j = 0; j < prop->count_enums; j++) {
++                if (prop->enums[j].value != props->prop_values[i]) {
++                    continue;
++                }
++                if (SDL_strcmp(prop->enums[j].name, "Upside Down") == 0) {
++                    rotation = DRM_MODE_ROTATE_180;
++                } else if (SDL_strcmp(prop->enums[j].name, "Left Side Up") == 0) {
++                    rotation = DRM_MODE_ROTATE_90;
++                } else if (SDL_strcmp(prop->enums[j].name, "Right Side Up") == 0) {
++                    rotation = DRM_MODE_ROTATE_270;
++                }
++            }
++        }
++        KMSDRM_drmModeFreeProperty(prop);
++    }
++    KMSDRM_drmModeFreeObjectProperties(props);
++    return rotation;
++}
++
++static void KMSDRM_SetupPanelRotation(_THIS, SDL_DisplayData *dispdata, drmModeRes *resources)
++{
++    SDL_VideoData *viddata = (SDL_VideoData *)_this->driverdata;
++    int drm_fd = viddata->drm_fd;
++    const char *hint = SDL_getenv("SDL_KMSDRM_PANEL_ROTATION");
++    drmModePlaneResPtr planes;
++    uint64_t rotation;
++    int crtc_index = -1;
++    int rot_bit;
++    uint32_t i, k;
++    int j;
++
++    if (hint && *hint) {
++        switch (SDL_atoi(hint)) {
++        case 90:  rotation = DRM_MODE_ROTATE_90;  break;
++        case 180: rotation = DRM_MODE_ROTATE_180; break;
++        case 270: rotation = DRM_MODE_ROTATE_270; break;
++        default:  rotation = DRM_MODE_ROTATE_0;   break;
++        }
++    } else {
++        rotation = KMSDRM_PanelOrientationRotation(drm_fd, dispdata->connector->connector_id);
++    }
++    if (rotation == DRM_MODE_ROTATE_0) {
++        return;
++    }
++    for (j = 0; j < resources->count_crtcs; j++) {
++        if (resources->crtcs[j] == dispdata->crtc->crtc_id) {
++            crtc_index = j;
++            break;
++        }
++    }
++    if (crtc_index < 0) {
++        return;
++    }
++    /* The bit of the rotation in the property's bitmask. */
++    for (rot_bit = 0; rot_bit < 4 && !(rotation & (1ULL << rot_bit)); rot_bit++) {
++    }
++
++    KMSDRM_drmSetClientCap(drm_fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
++    planes = KMSDRM_drmModeGetPlaneResources(drm_fd);
++    if (!planes) {
++        return;
++    }
++    for (i = 0; i < planes->count_planes && !dispdata->rot_plane_id; i++) {
++        drmModePlanePtr plane = KMSDRM_drmModeGetPlane(drm_fd, planes->planes[i]);
++        drmModeObjectPropertiesPtr props;
++        SDL_bool primary = SDL_FALSE;
++        uint32_t rot_prop = 0;
++
++        if (!plane) {
++            continue;
++        }
++        if (!(plane->possible_crtcs & (1 << crtc_index))) {
++            KMSDRM_drmModeFreePlane(plane);
++            continue;
++        }
++        props = KMSDRM_drmModeObjectGetProperties(drm_fd, plane->plane_id, DRM_MODE_OBJECT_PLANE);
++        for (k = 0; props && k < props->count_props; k++) {
++            drmModePropertyPtr prop = KMSDRM_drmModeGetProperty(drm_fd, props->props[k]);
++            if (!prop) {
++                continue;
++            }
++            if (SDL_strcmp(prop->name, "type") == 0) {
++                primary = (props->prop_values[k] == DRM_PLANE_TYPE_PRIMARY) ? SDL_TRUE : SDL_FALSE;
++            } else if (SDL_strcmp(prop->name, "rotation") == 0 && (prop->flags & DRM_MODE_PROP_BITMASK)) {
++                for (j = 0; j < prop->count_enums; j++) {
++                    if (prop->enums[j].value == (uint64_t)rot_bit) {
++                        rot_prop = prop->prop_id;
++                    }
++                }
++            }
++            KMSDRM_drmModeFreeProperty(prop);
++        }
++        if (props) {
++            KMSDRM_drmModeFreeObjectProperties(props);
++        }
++        if (primary && rot_prop) {
++            dispdata->rot_plane_id = plane->plane_id;
++            dispdata->rot_prop_id = rot_prop;
++            dispdata->rot_value = rotation;
++            dispdata->rot_swap = (rotation == DRM_MODE_ROTATE_90 || rotation == DRM_MODE_ROTATE_270) ? SDL_TRUE : SDL_FALSE;
++        }
++        KMSDRM_drmModeFreePlane(plane);
++    }
++    KMSDRM_drmModeFreePlaneResources(planes);
++
++    if (dispdata->rot_plane_id) {
++        SDL_LogDebug(SDL_LOG_CATEGORY_VIDEO, "KMSDRM: panel turned by plane %u, rotation 0x%x",
++                     (unsigned)dispdata->rot_plane_id, (unsigned)dispdata->rot_value);
++    } else {
++        SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "KMSDRM: the panel is mounted rotated, but no primary plane can turn it");
++    }
++}
++
++/* Turns the plane (on), or puts it back upright (off) before the original
++   CRTC configuration, the console's, is restored. Needs DRM master. A plane
++   that refuses leaves the display unturned, sides unswapped. */
++static void KMSDRM_ApplyPanelRotation(_THIS, SDL_DisplayData *dispdata, SDL_bool on)
++{
++    SDL_VideoData *viddata = (SDL_VideoData *)_this->driverdata;
++
++    if (!dispdata->rot_plane_id) {
++        return;
++    }
++    if (KMSDRM_drmModeObjectSetProperty(viddata->drm_fd, dispdata->rot_plane_id, DRM_MODE_OBJECT_PLANE,
++                                        dispdata->rot_prop_id, on ? dispdata->rot_value : DRM_MODE_ROTATE_0) != 0) {
++        if (on) {
++            SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "KMSDRM: could not turn the panel's plane, showing it unturned");
++            dispdata->rot_plane_id = 0;
++            dispdata->rot_swap = SDL_FALSE;
++        }
++    }
++}
++
+ static void KMSDRM_AddDisplay(_THIS, drmModeConnector *connector, drmModeRes *resources)
+ {
+     SDL_VideoData *viddata = ((SDL_VideoData *)_this->driverdata);
+@@ -874,6 +1049,9 @@ static void KMSDRM_AddDisplay(_THIS, drmModeConnector *connector, drmModeRes *re
+     dispdata->connector = connector;
+     dispdata->crtc = crtc;
+ 
++    /* A panel mounted rotated: which plane turns it, and by how much. */
++    KMSDRM_SetupPanelRotation(_this, dispdata, resources);
++
+     /* save previous vrr state */
+     dispdata->saved_vrr = KMSDRM_CrtcGetVrr(viddata->drm_fd, crtc->crtc_id);
+     /* try to enable vrr */
+@@ -898,8 +1076,8 @@ static void KMSDRM_AddDisplay(_THIS, drmModeConnector *connector, drmModeRes *re
+     modedata->mode_index = mode_index;
+ 
+     display.driverdata = dispdata;
+-    display.desktop_mode.w = dispdata->mode.hdisplay;
+-    display.desktop_mode.h = dispdata->mode.vdisplay;
++    display.desktop_mode.w = KMSDRM_MODE_W(dispdata, dispdata->mode);
++    display.desktop_mode.h = KMSDRM_MODE_H(dispdata, dispdata->mode);
+     display.desktop_mode.refresh_rate = dispdata->mode.vrefresh;
+     display.desktop_mode.format = SDL_PIXELFORMAT_ARGB8888;
+     display.desktop_mode.driverdata = modedata;
+@@ -1097,6 +1275,9 @@ static void KMSDRM_DestroySurfaces(_THIS, SDL_Window *window)
+     /* original video mode and make it point to the original TTY buffer.   */
+     /***********************************************************************/
+ 
++    /* The console's buffer is upright: the panel's plane goes back first. */
++    KMSDRM_ApplyPanelRotation(_this, dispdata, SDL_FALSE);
++
+     ret = KMSDRM_drmModeSetCrtc(viddata->drm_fd, dispdata->crtc->crtc_id,
+                                 dispdata->crtc->buffer_id, 0, 0, &dispdata->connector->connector_id, 1,
+                                 &dispdata->original_mode);
+@@ -1181,7 +1362,9 @@ static void KMSDRM_DirtySurfaces(SDL_Window *window)
+        or SetWindowFullscreen, send a fake event for now since the actual
+        recreation is deferred */
+     KMSDRM_GetModeToSet(window, &mode);
+-    SDL_SendWindowEvent(window, SDL_WINDOWEVENT_RESIZED, mode.hdisplay, mode.vdisplay);
++    SDL_SendWindowEvent(window, SDL_WINDOWEVENT_RESIZED,
++                        KMSDRM_MODE_W((SDL_DisplayData *)SDL_GetDisplayForWindow(window)->driverdata, mode),
++                        KMSDRM_MODE_H((SDL_DisplayData *)SDL_GetDisplayForWindow(window)->driverdata, mode));
+ }
+ 
+ /* This determines the size of the fb, which comes from the GBM surface
+@@ -1216,13 +1399,18 @@ int KMSDRM_CreateSurfaces(_THIS, SDL_Window *window)
+        mode that's set in sync with what SDL_video.c thinks is set */
+     KMSDRM_GetModeToSet(window, &dispdata->mode);
+ 
+-    display->current_mode.w = dispdata->mode.hdisplay;
+-    display->current_mode.h = dispdata->mode.vdisplay;
++    /* Turn the panel's plane now, while this program is DRM master, so the
++       first drmModeSetCrtc() in SwapWindow() scans out the turned buffer. */
++    KMSDRM_ApplyPanelRotation(_this, dispdata, SDL_TRUE);
++
++    display->current_mode.w = KMSDRM_MODE_W(dispdata, dispdata->mode);
++    display->current_mode.h = KMSDRM_MODE_H(dispdata, dispdata->mode);
+     display->current_mode.refresh_rate = dispdata->mode.vrefresh;
+     display->current_mode.format = SDL_PIXELFORMAT_ARGB8888;
+ 
+     windata->gs = KMSDRM_gbm_surface_create(viddata->gbm_dev,
+-                                            dispdata->mode.hdisplay, dispdata->mode.vdisplay,
++                                            KMSDRM_MODE_W(dispdata, dispdata->mode),
++                                            KMSDRM_MODE_H(dispdata, dispdata->mode),
+                                             surface_fmt, surface_flags);
+ 
+     if (!windata->gs) {
+@@ -1246,7 +1434,8 @@ int KMSDRM_CreateSurfaces(_THIS, SDL_Window *window)
+     ret = SDL_EGL_MakeCurrent(_this, windata->egl_surface, egl_context);
+ 
+     SDL_SendWindowEvent(window, SDL_WINDOWEVENT_RESIZED,
+-                        dispdata->mode.hdisplay, dispdata->mode.vdisplay);
++                        KMSDRM_MODE_W(dispdata, dispdata->mode),
++                        KMSDRM_MODE_H(dispdata, dispdata->mode));
+ 
+     windata->egl_surface_dirty = SDL_FALSE;
+ 
+@@ -1363,8 +1552,8 @@ void KMSDRM_GetDisplayModes(_THIS, SDL_VideoDisplay *display)
+             modedata->mode_index = i;
+         }
+ 
+-        mode.w = conn->modes[i].hdisplay;
+-        mode.h = conn->modes[i].vdisplay;
++        mode.w = KMSDRM_MODE_W(dispdata, conn->modes[i]);
++        mode.h = KMSDRM_MODE_H(dispdata, conn->modes[i]);
+         mode.refresh_rate = conn->modes[i].vrefresh;
+         mode.format = SDL_PIXELFORMAT_ARGB8888;
+         mode.driverdata = modedata;
+diff --git a/src/video/kmsdrm/SDL_kmsdrmvideo.h b/src/video/kmsdrm/SDL_kmsdrmvideo.h
+index 1643143..debfbac 100644
+--- a/src/video/kmsdrm/SDL_kmsdrmvideo.h
++++ b/src/video/kmsdrm/SDL_kmsdrmvideo.h
+@@ -119,8 +119,22 @@ typedef struct SDL_DisplayData
+     uint64_t cursor_w, cursor_h;
+ 
+     SDL_bool default_cursor_init;
++
++    /* Panel rotation (LightMoss): a panel mounted rotated (the connector's
++       "panel orientation") is turned by the primary plane's "rotation"
++       property, and SDL shows the display with its sides swapped for 90 and
++       270 degrees. rot_plane_id is 0 when nothing is rotated. */
++    uint32_t rot_plane_id;
++    uint32_t rot_prop_id;
++    uint64_t rot_value;
++    SDL_bool rot_swap;
+ } SDL_DisplayData;
+ 
++/* The display mode's size as SDL shows it: sides swapped on a panel turned
++   by 90 or 270 degrees. */
++#define KMSDRM_MODE_W(dispdata, m) ((dispdata)->rot_swap ? (m).vdisplay : (m).hdisplay)
++#define KMSDRM_MODE_H(dispdata, m) ((dispdata)->rot_swap ? (m).hdisplay : (m).vdisplay)
++
+ typedef struct SDL_WindowData
+ {
+     SDL_VideoData *viddata;

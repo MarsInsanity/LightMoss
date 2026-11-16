@@ -1,0 +1,30 @@
+#!/bin/sh
+# Run by systemd around suspend (spruce's sleep goes through systemctl suspend).
+# Its output goes to the journal (lightmoss-debug exports it to /boot/logs).
+STATE=/run/lightmoss-sleep
+STATS=/sys/kernel/debug/suspend_stats
+
+case "$1" in
+pre)
+	mkdir -p "$STATE"
+	echo "lightmoss-sleep: entering $2; kernel offers: $(cat /sys/power/state 2>/dev/null)"
+	if grep -qw lightmoss.debug /proc/cmdline; then
+		echo 1 > /sys/power/pm_print_times 2>/dev/null
+	fi
+	# Dark at once, so sleep looks immediate.
+	for bl in /sys/class/backlight/*; do
+		[ -e "$bl/brightness" ] || continue
+		cat "$bl/brightness" > "$STATE/${bl##*/}" 2>/dev/null
+		echo 0 > "$bl/brightness" 2>/dev/null
+	done
+	alsactl store -f "$STATE/asound.state" 2>/dev/null
+	;;
+post)
+	alsactl restore -f "$STATE/asound.state" 2>/dev/null
+	for bl in /sys/class/backlight/*; do
+		[ -f "$STATE/${bl##*/}" ] && cat "$STATE/${bl##*/}" > "$bl/brightness" 2>/dev/null
+	done
+	[ -r "$STATS" ] && echo "lightmoss-sleep: back from $2; $(tr -s ' \t\n' ' ' < "$STATS")"
+	;;
+esac
+exit 0

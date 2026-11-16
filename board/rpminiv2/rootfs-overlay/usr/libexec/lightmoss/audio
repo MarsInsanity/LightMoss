@@ -1,0 +1,66 @@
+#!/bin/sh
+# The Retroid Pocket's sound card (q6 audio DSP, WCD9385 headphone codec,
+# two WSA881x speaker amplifiers): switch it on, then follow the headphone
+# jack.
+#
+# ROCKNIX's UCM configuration (alsa-ucm-conf, HiFi verb) switches the codecs
+# on and routes frontend MultiMedia1 (hw:0,0) to the headphones and
+# MultiMedia2 (hw:0,1) to the speakers. spruce plays to hw:0,0 only (its
+# softvol "Master" over dmix, as on every dArkMoss-style base), so
+# MultiMedia1 goes to the speakers too while no headphones are in: one PCM,
+# whichever output is in use.
+#
+# The jack state goes to /run/lightmoss/headphones (1 or 0) for spruce
+# (HEADPHONE_STATE_PATH). /boot/headphones-invert swaps it, for units that
+# report the jack the other way round.
+STATE=/run/lightmoss/headphones
+mkdir -p /run/lightmoss
+
+card=""
+n=0
+while [ -z "$card" ] && [ "$n" -lt 60 ]; do
+	for c in /proc/asound/card[0-9]*; do
+		[ -e "$c/id" ] || continue
+		case "$(cat "$c/id")" in
+			RetroidPocket*) card="${c##*/card}" ;;
+		esac
+	done
+	[ -n "$card" ] || { sleep 1; n=$((n + 1)); }
+done
+[ -n "$card" ] || { echo "lightmoss-audio: no RetroidPocket sound card" >&2; exit 1; }
+
+cset() { amixer -q -c "$card" cset "name=$1" "$2" 2>/dev/null; }
+
+# One alsaucm run: the verb it sets is only known inside that process. The
+# codec settings stay when it exits.
+alsaucm -c "hw:$card" set _boot "" set _verb HiFi set _enadev Speaker set _enadev Headphones ||
+	echo "lightmoss-audio: alsaucm could not set up the card" >&2
+
+jack() {
+	v="$(amixer -c "$card" cget "name=Headphone Jack" 2>/dev/null | sed -n 's/.*: values=\(.*\)/\1/p')"
+	case "$v" in on) j=1 ;; *) j=0 ;; esac
+	[ -e /boot/headphones-invert ] && j=$((1 - j))
+	echo "$j"
+}
+
+route() {
+	if [ "$1" = 1 ]; then
+		cset "WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia1" 0
+		cset "RX_CODEC_DMA_RX_0 Audio Mixer MultiMedia1" 1
+	else
+		cset "RX_CODEC_DMA_RX_0 Audio Mixer MultiMedia1" 0
+		cset "WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia1" 1
+	fi
+	echo "$1" > "$STATE.new" && mv -f "$STATE.new" "$STATE"
+	echo "lightmoss-audio: headphones $( [ "$1" = 1 ] && echo in || echo out)"
+}
+
+last=""
+while :; do
+	now="$(jack)"
+	if [ "$now" != "$last" ]; then
+		route "$now"
+		last="$now"
+	fi
+	sleep 1
+done
