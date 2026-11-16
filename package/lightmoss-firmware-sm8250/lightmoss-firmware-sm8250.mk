@@ -25,15 +25,30 @@ LIGHTMOSS_FIRMWARE_SM8250_FILES = \
 	qca/htbtfw20.tlv \
 	qca/htnv20.bin
 
+# Some names exist in the tarball only as "Link: name -> target" lines of
+# WHENCE (linux-firmware's copy-firmware.sh makes them at install time): such
+# a file is copied from its target, relative to its own directory.
 define LIGHTMOSS_FIRMWARE_SM8250_INSTALL_TARGET_CMDS
-	mkdir -p $(TARGET_DIR)/usr/lib/firmware
-	cd $(@D) && for f in $(LIGHTMOSS_FIRMWARE_SM8250_FILES); do \
-		test -e "$$f" || { echo "linux-firmware has no $$f" >&2; exit 1; }; \
-		mkdir -p "$(TARGET_DIR)/usr/lib/firmware/$$(dirname $$f)"; \
-		cp -aL "$$f" "$(TARGET_DIR)/usr/lib/firmware/$$(dirname $$f)/"; \
+	mkdir -p $(TARGET_DIR)/usr/lib/firmware/qcom/sm8250
+	cd $(@D) && for f in $(LIGHTMOSS_FIRMWARE_SM8250_FILES) qcom/sm8250/Thundercomm/RB5/slpi.mbn; do \
+		src="$$f"; \
+		if [ ! -e "$$src" ]; then \
+			t="$$(sed -n "s|^Link: $$f -> ||p" WHENCE | head -n 1)"; \
+			[ -n "$$t" ] && src="$$(dirname $$f)/$$t"; \
+		fi; \
+		test -e "$$src" || { echo "linux-firmware has no $$f" >&2; exit 1; }; \
+		case "$$f" in \
+			*/Thundercomm/RB5/slpi.mbn) dst=qcom/sm8250/slpi.mbn ;; \
+			*) dst="$$f" ;; \
+		esac; \
+		mkdir -p "$(TARGET_DIR)/usr/lib/firmware/$$(dirname $$dst)"; \
+		if [ -d "$$src" ]; then \
+			mkdir -p "$(TARGET_DIR)/usr/lib/firmware/$$dst"; \
+			cp -aL "$$src/." "$(TARGET_DIR)/usr/lib/firmware/$$dst/"; \
+		else \
+			cp -L "$$src" "$(TARGET_DIR)/usr/lib/firmware/$$dst"; \
+		fi; \
 	done
-	cp -L $(@D)/qcom/sm8250/Thundercomm/RB5/slpi.mbn \
-		$(TARGET_DIR)/usr/lib/firmware/qcom/sm8250/slpi.mbn
 endef
 
 $(eval $(generic-package))
