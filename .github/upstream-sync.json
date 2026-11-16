@@ -2,11 +2,11 @@
   "about": "What LightMoss's daily maintenance run has reviewed: newer commits and releases are reviewed next time. Updated with the run's own commits.",
   "spruceUI/spruceOS": {
     "branch": "Development",
-    "commit": "7921dca4cf604824ee769a5534820bca02a6baef",
+    "commit": "7838e48e571cb5d5f30d94dc917baca5d096ac23",
     "latest_release": "v4.6.0"
   },
   "spruceUI/spruceOSNightlies": {
-    "latest_release": "v4.6.1-20261115.2"
+    "latest_release": "v4.6.1-20261115.3"
   },
   "spruceUI/dArkMoss": {
     "branch": "spruce",
