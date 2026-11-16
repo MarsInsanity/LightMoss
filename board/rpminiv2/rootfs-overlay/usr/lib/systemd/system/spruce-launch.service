@@ -7,7 +7,7 @@ Description=Hand off to spruce
 # since spruce's startup runs nmcli. mount-spruce waits for the card itself;
 # there is no mount unit for it.
 After=local-fs.target systemd-udev-trigger.service alsa-restore.service alsa-state.service
-After=lightmoss-audio.service NetworkManager.service lightmoss-firstboot.service lightmoss-install-internal.service
+After=lightmoss-audio.service lightmoss-volkeys.service NetworkManager.service lightmoss-firstboot.service lightmoss-install-internal.service
 
 [Service]
 Type=simple

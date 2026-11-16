@@ -1,0 +1,7 @@
+config BR2_PACKAGE_LIGHTMOSS_VOLKEYS
+	bool "lightmoss-volkeys"
+	help
+	  One input device ("LightMoss Volume Keys", through uinput)
+	  for a volume rocker whose two keys come from two devices, as
+	  on the Retroid Pocket Mini V2 (gpio-keys and the PMIC's resin
+	  key): spruce watches the volume keys on a single node.

@@ -94,6 +94,8 @@ BR2_PACKAGE_ALSA_UTILS_APLAY=y
 # The sound card's routing (speakers, headphones), as ROCKNIX sets it up.
 BR2_PACKAGE_ALSA_UCM_CONF=y
 BR2_PACKAGE_LIBEVDEV=y
+# Volume Up and Down come from two input devices; spruce watches one.
+BR2_PACKAGE_LIGHTMOSS_VOLKEYS=y
 # Bluetooth (the QCA6390's) is left for later: spruce's platform for this
 # device does not offer it yet, and bluetoothd + bluealsa would be its job.
 

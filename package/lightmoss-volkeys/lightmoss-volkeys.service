@@ -1,0 +1,13 @@
+[Unit]
+Description=One input device for the volume rocker
+After=systemd-udev-trigger.service
+# spruce looks for the volume keys once, when it starts.
+Before=spruce-launch.service
+
+[Service]
+ExecStart=/usr/sbin/lightmoss-volkeys
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
