@@ -1,0 +1,102 @@
+#!/bin/sh
+# LightMoss (Retroid Pocket Mini V2): keep an impossible wall clock out of the
+# system, early in the boot, before anything stamps files with it or saves it.
+#
+# The PMIC RTC (rtc-pm8xxx) cannot be set; Linux keeps an offset to its counter
+# in a PM8150 SDAM cell instead. Until something has set the clock under Linux,
+# that cell holds whatever was there, and on the first unit that read as
+# October 2075. The kernel sets the system clock from it (hctosys),
+# systemd-timesyncd saves that time to its clock file every minute, and PID 1
+# advances the clock to the clock file's time on every later boot: one bad boot
+# keeps the clock in 2075 for good, even with a correct RTC. 2075 is past what a
+# 32-bit time_t holds (the lib32 runtime: time() and stat() fail with
+# EOVERFLOW), and it makes every HTTPS certificate look expired.
+#
+# A time is plausible when it is not before this system was built and before
+# 2038. When the clock is not, it goes to the best plausible time there is: the
+# RTC's, else timesyncd's last saved time, else the build time. An implausible
+# RTC is then set from the system clock (that rewrites the SDAM offset), so the
+# next boot starts from there; NTP corrects the rest once Wi-Fi is up (the
+# kernel's RTC_SYSTOHC writes the RTC after timesyncd has synchronised).
+
+CLOCKFILE=/var/lib/systemd/timesync/clock
+# 2038-01-01T00:00:00Z, a little before 32-bit time_t runs out.
+CEILING=2145916800
+# 2025-01-01T00:00:00Z, in case the files below cannot be read.
+FLOOR=1735689600
+
+log() { echo "lightmoss-clock: $*"; }
+
+mtime() { date -r "$1" +%s 2>/dev/null; }
+
+# This system's build time: /usr/lib/clock-epoch (shipped for this, systemd's
+# PID 1 honours it too) and os-release (written by the build).
+for f in /usr/lib/clock-epoch /usr/lib/os-release; do
+	t="$(mtime "$f")"
+	case "$t" in '' | *[!0-9]*) continue ;; esac
+	[ "$t" -gt "$FLOOR" ] && [ "$t" -lt "$CEILING" ] && FLOOR="$t"
+done
+
+plausible() {
+	case "$1" in '' | *[!0-9]*) return 1 ;; esac
+	[ "$1" -ge "$FLOOR" ] && [ "$1" -lt "$CEILING" ]
+}
+
+# The RTC is built in (with the SDAM driver it needs), so it is normally there
+# before PID 1. Give a late one a moment: once it registers, the kernel sets
+# the clock from it, and that must happen before the check below.
+i=0
+while [ ! -e /sys/class/rtc/rtc0 ] && [ "$i" -lt 50 ]; do
+	sleep 0.1
+	i=$((i + 1))
+done
+[ -e /sys/class/rtc/rtc0 ] || log "no RTC (rtc0) after 5 s"
+
+now="$(date +%s)"
+rtc="$(cat /sys/class/rtc/rtc0/since_epoch 2>/dev/null)"
+saved="$(mtime "$CLOCKFILE")"
+
+# A clock, RTC or timesyncd's saved time past the ceiling means files were
+# (or are being) stamped in the future: lightmoss-clock-files.service re-dates
+# them once the card is mounted.
+for t in "$now" "$rtc" "$saved"; do
+	case "$t" in '' | *[!0-9]*) continue ;; esac
+	if [ "$t" -ge "$CEILING" ]; then
+		mkdir -p /var/lib/lightmoss && : > /var/lib/lightmoss/clock-files-to-fix
+		break
+	fi
+done
+
+if ! plausible "$now"; then
+	if plausible "$rtc"; then
+		target="$rtc" from="the RTC"
+	elif plausible "$saved"; then
+		target="$saved" from="timesyncd's saved time"
+	else
+		target="$FLOOR" from="the build time"
+	fi
+	log "the clock read $(date -u -d "@$now" '+%F %T' 2>/dev/null) UTC ($now); setting it from $from"
+	date -u -s "@$target" >/dev/null || log "could not set the clock"
+	now="$(date +%s)"
+fi
+
+if [ -e /dev/rtc0 ] && ! plausible "$rtc" && plausible "$now"; then
+	log "the RTC read ${rtc:-nothing}; setting it from the system clock ($(date -u '+%F %T') UTC)"
+	hwclock -w -u -f /dev/rtc0 || log "could not set the RTC (its offset may not be writable)"
+fi
+
+# A clock file from an impossible time would push the clock forward again on
+# the next boot (PID 1 and timesyncd both treat it as the earliest valid time).
+if [ -e "$CLOCKFILE" ] && plausible "$now"; then
+	case "$saved" in
+	'' | *[!0-9]*) ;;
+	*)
+		if [ "$saved" -ge "$CEILING" ]; then
+			log "timesyncd's clock file was from $(date -u -d "@$saved" '+%F' 2>/dev/null); resetting it"
+			touch -c -d "@$now" "$CLOCKFILE" || log "could not reset $CLOCKFILE"
+		fi
+		;;
+	esac
+fi
+
+exit 0

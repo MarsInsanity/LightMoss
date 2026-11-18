@@ -1,0 +1,19 @@
+[Unit]
+Description=Keep an impossible clock (the PMIC RTC's 2075) out of the system
+Documentation=file:/usr/libexec/lightmoss/clock
+DefaultDependencies=no
+# The RTC is read and set here, and timesyncd's clock file rewritten, before
+# PID 1's successors and timesyncd take the clock as valid.
+After=systemd-remount-fs.service
+Before=sysinit.target time-set.target systemd-timesyncd.service shutdown.target
+Wants=time-set.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/lightmoss/clock
+TimeoutStartSec=30
+
+[Install]
+WantedBy=sysinit.target
