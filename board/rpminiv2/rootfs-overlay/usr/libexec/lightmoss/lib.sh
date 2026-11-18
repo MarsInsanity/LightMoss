@@ -23,9 +23,13 @@ lm_part() {
 	esac
 }
 
-# The GPT name of a partition (kernel name: sda34, mmcblk0p1).
+# The GPT name of a partition (kernel name: sda34, mmcblk0p1). The kernel
+# knows it when it read the table itself; a partition added by partx (BLKPG)
+# has none there, so the table on the disk is asked then.
 lm_part_name() {
-	sed -n 's/^PARTNAME=//p' "/sys/class/block/$1/uevent" 2>/dev/null
+	_n="$(sed -n 's/^PARTNAME=//p' "/sys/class/block/$1/uevent" 2>/dev/null)"
+	[ -n "$_n" ] || _n="$(blkid -p -o value -s PART_ENTRY_NAME "/dev/$1" 2>/dev/null)"
+	echo "$_n"
 }
 
 # The partition of a disk with a given GPT name: lm_part_named sda LMBOOT -> /dev/sda35
@@ -74,6 +78,85 @@ lm_charger_online() {
 	return 1
 }
 
+# A charger is connected, or the battery has at least $1 percent (30 when not
+# given) left. A device that reports no battery level is let through.
+lm_power_ok() {
+	lm_charger_online && return 0
+	for _c in /sys/class/power_supply/*/capacity; do
+		[ -e "$_c" ] || continue
+		[ "$(cat "${_c%/capacity}/type" 2>/dev/null)" = Battery ] || continue
+		_l="$(cat "$_c" 2>/dev/null)"
+		case "$_l" in ''|*[!0-9]*) continue ;; esac
+		[ "$_l" -ge "${1:-30}" ]
+		return
+	done
+	return 0
+}
+
+# The FAT on a partition as the firmware's FAT driver (edk2's EnhancedFatDxe,
+# which OpenABL boots through) judges it, from the boot sector: prints
+# "FAT32 130784" (the type and the number of data clusters) and succeeds when
+# that driver mounts it. It refuses a FAT32 with fewer than 65525 clusters,
+# which Linux mounts without a word (256 MiB on 4 KiB sectors has 65376), and
+# a FAT12/16 with that many or more.
+lm_fat_info() {
+	# Bytes 11-39: the BIOS parameter block up to FAT32's sectors per FAT.
+	# shellcheck disable=SC2046 # one argument per byte
+	set -- $(od -A n -t u1 -j 11 -N 29 "$1" 2>/dev/null)
+	[ $# -eq 29 ] || return 1
+	_bps=$(( $1 + $2 * 256 )); _spc=$3; _rsvd=$(( $4 + $5 * 256 )); _nfats=$6
+	_root=$(( $7 + $8 * 256 )); _secs=$(( $9 + ${10} * 256 ))
+	_fatsz=$(( ${12} + ${13} * 256 ))
+	[ "$_secs" != 0 ] || _secs=$(( ${22} + ${23} * 256 + ${24} * 65536 + ${25} * 16777216 ))
+	_type=FAT16
+	if [ "$_fatsz" = 0 ]; then
+		_type=FAT32
+		_fatsz=$(( ${26} + ${27} * 256 + ${28} * 65536 + ${29} * 16777216 ))
+	fi
+	case "$_bps" in 512|1024|2048|4096) ;; *) return 1 ;; esac
+	case "$_spc" in 1|2|4|8|16|32|64|128) ;; *) return 1 ;; esac
+	[ "$_rsvd" -gt 0 ] && [ "$_nfats" -gt 0 ] && [ "$_secs" -gt 0 ] && [ "$_fatsz" -gt 0 ] || return 1
+	_data=$(( _rsvd + _nfats * _fatsz + (_root * 32 + _bps - 1) / _bps ))
+	[ "$_secs" -gt "$_data" ] || return 1
+	_clusters=$(( (_secs - _data) / _spc ))
+	if [ "$_type" = FAT32 ]; then
+		[ "$_clusters" -ge 65525 ] || { echo "FAT32 $_clusters"; return 1; }
+		# The FAT has an entry for each cluster.
+		[ $(( _fatsz * _bps / 4 )) -ge $(( _clusters + 2 )) ] || return 1
+	else
+		if [ "$_root" = 0 ] || [ "$_clusters" -ge 65525 ]; then
+			echo "$_type $_clusters"
+			return 1
+		fi
+		[ "$_clusters" -ge 4085 ] || _type=FAT12
+	fi
+	echo "$_type $_clusters"
+}
+
+# The filesystem on a partition was not cleanly unmounted (power cut, crash):
+# the dirty flag Linux sets while a FAT or exFAT volume is mounted (FAT) or
+# being written (exFAT, kept until a check clears it). lm_fs_dirty DEV TYPE
+# shellcheck disable=SC2046 # od's bytes, one argument each
+lm_fs_dirty() {
+	case "$2" in
+		vfat)
+			# The state byte: offset 65 on FAT32 (no FAT16 sectors-per-FAT), 37 before.
+			set -- "$1" $(od -A n -t u1 -j 22 -N 2 "$1" 2>/dev/null)
+			[ $# -eq 3 ] || return 1
+			if [ $(( $2 + $3 )) = 0 ]; then _at=65; else _at=37; fi
+			set -- $(od -A n -t u1 -j "$_at" -N 1 "$1" 2>/dev/null)
+			[ $# -eq 1 ] && [ $(( $1 & 1 )) = 1 ]
+			;;
+		exfat)
+			# VolumeFlags, bit 1: VolumeDirty.
+			set -- $(od -A n -t u1 -j 106 -N 1 "$1" 2>/dev/null)
+			[ $# -eq 1 ] && [ $(( $1 & 2 )) = 2 ]
+			;;
+		*) return 1 ;;
+	esac
+}
+
+# A message on the screen (tty1). Never fails: the screen is a nicety.
 lm_say() {
-	printf '\033[2J\033[H\n\n  %b\n' "$1" > /dev/tty1 2>/dev/null
+	printf '\033[2J\033[H\n\n  %b\n' "$1" > /dev/tty1 2>/dev/null || :
 }
