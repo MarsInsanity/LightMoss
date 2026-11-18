@@ -12,7 +12,7 @@ BR2_BACKUP_SITE="https://sources.buildroot.net"
 BR2_CCACHE=y
 BR2_OPTIMIZE_2=y
 # Hashes for the kernel tarball and patches for buildroot's own packages
-# (SDL2's panel rotation).
+# and this tree's (SDL2's and SDL3's panel rotation).
 BR2_GLOBAL_PATCH_DIR="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/rpminiv2/patches"
 
 # --- Toolchain: glibc (PortMaster ports are glibc binaries) --------------------
