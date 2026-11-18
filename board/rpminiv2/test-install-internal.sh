@@ -30,7 +30,8 @@
 # (no charger, replace flag, a failure's reason); firstboot (new SPRUCEOS, one
 # left unformatted, one that is fine, a card with a gap in its numbering);
 # mount-spruce (UTF-8 FAT names, a dirty FAT or exFAT checked first, an empty
-# SPRUCEOS). Every successful run must exit 0.
+# SPRUCEOS, spruce-launch's start timeout long enough for a check). Every
+# successful run must exit 0.
 #
 # It takes about ten minutes, most of it the scripts' own pauses (busybox
 # sh's sleep is a builtin). Needs root, losetup with -b, sfdisk, sgdisk,
@@ -625,6 +626,13 @@ CARDS="$C2 $CARD"
 mspruce
 check "M5: spruce on another card's FAT partition" '[ "$RC" = 0 ] && grep -q "spruce found on /dev/${C2}p1" "$W/out"'
 unmount_sd
+# mount-spruce runs as an ExecStartPre of spruce-launch.service: its start
+# timeout must leave a check (and the retry's) the time mount-spruce gives it,
+# or systemd ends the check, restarts and checks again, for ever.
+tss="$(sed -n 's/^TimeoutStartSec=\([0-9]*\)min$/\1/p' "$OV/usr/lib/systemd/system/spruce-launch.service")"
+fto="$(sed -n 's/.*timeout \([0-9]*\) fsck\.fat .*/\1/p' "$OV/usr/libexec/lightmoss/mount-spruce")"
+check "M6: spruce-launch's start timeout (${tss:-default 1.5} min) outlasts two checks of ${fto:-?} s" \
+	'[ -n "$tss" ] && [ -n "$fto" ] && [ $((tss * 60)) -gt $((2 * fto + 120)) ]'
 
 # ===========================================================================
 echo
