@@ -37,6 +37,12 @@ define LIGHTMOSS_LIB32_INSTALL_TARGET_CMDS
 		case "$$t" in */*) ln -sfn "$${t##*/}" "$$f" ;; esac; \
 		[ -e "$$f" ] || unlink "$$f"; \
 	done
+	# Mesa's GBM backend (dri_gbm.so): a plugin in its own directory, which
+	# the 32-bit libgbm searches (external.mk). Not in the Mali blob's build.
+	if [ -d $(@D)/usr/lib/gbm ]; then \
+		mkdir -p $(TARGET_DIR)$(LIGHTMOSS_LIB32_LIBDIR)/gbm && \
+		cp -a $(@D)/usr/lib/gbm/. $(TARGET_DIR)$(LIGHTMOSS_LIB32_LIBDIR)/gbm/; \
+	fi
 	ln -sf arm-linux-gnueabihf/ld-linux-armhf.so.3 \
 		$(TARGET_DIR)/usr/lib/ld-linux-armhf.so.3
 endef

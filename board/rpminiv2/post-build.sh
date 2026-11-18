@@ -54,6 +54,14 @@ PYTHON="${HOST_DIR:-}/bin/python3"
 # spruce's dArkMoss code and PortMaster (PYSDL2_DLL_PATH, LD_LIBRARY_PATH) look for
 # the system libraries in Debian's multiarch directory.
 ln -sfn . "$TARGET_DIR/usr/lib/aarch64-linux-gnu"
+# Debian splits ncurses into libncursesw/libncurses and libtinfo; buildroot
+# builds one wide-character library holding all of it. Programs built on
+# Debian (spruce's rnano, its flip libmp3lame) load it by Debian's names.
+for l in libtinfo.so.6 libncurses.so.6; do
+	if [ -e "$TARGET_DIR/usr/lib/libncursesw.so.6" ] && [ ! -e "$TARGET_DIR/usr/lib/$l" ]; then
+		ln -sf libncursesw.so.6 "$TARGET_DIR/usr/lib/$l"
+	fi
+done
 
 # --- boot files: what LMBOOT boots this system with -------------------------------
 # In the system itself, so an installed copy, the install to the internal

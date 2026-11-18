@@ -12,7 +12,7 @@ BR2_BACKUP_SITE="https://sources.buildroot.net"
 BR2_CCACHE=y
 BR2_OPTIMIZE_2=y
 # Hashes for the kernel tarball and patches for buildroot's own packages
-# (SDL2's panel rotation).
+# and this tree's (SDL2's and SDL3's panel rotation).
 BR2_GLOBAL_PATCH_DIR="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/rpminiv2/patches"
 
 # --- Toolchain: glibc (PortMaster ports are glibc binaries) --------------------
@@ -126,6 +126,14 @@ BR2_PACKAGE_NETWORK_MANAGER_CLI=y
 BR2_PACKAGE_WPA_SUPPLICANT=y
 BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y
 BR2_PACKAGE_WPA_SUPPLICANT_DBUS=y
+# WPA3-Personal (SAE), Enhanced Open (OWE) and WPA2/3-Enterprise (EAP): the
+# QCA6390 leaves SAE to the supplicant. WPA3 brings OpenSSL (libssl.so.3,
+# libcrypto.so.3, which spruce's flip ffmpeg libraries also load).
+BR2_PACKAGE_WPA_SUPPLICANT_WPA3=y
+BR2_PACKAGE_WPA_SUPPLICANT_EAP=y
+# iw: the Wi-Fi country (usr/libexec/lightmoss/wifi-country) and spruce's
+# link status ("iw dev wlan0 link").
+BR2_PACKAGE_IW=y
 # spruce's Network Settings starts and stops the "ssh" unit (dropbear here).
 BR2_PACKAGE_DROPBEAR=y
 # BR2_PACKAGE_DROPBEAR_CLIENT is not set
@@ -133,6 +141,10 @@ BR2_PACKAGE_DROPBEAR=y
 # --- Userland tools the base, spruce and PortMaster scripts call ------------------
 BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/r36s/busybox.fragment"
 BR2_PACKAGE_BASH=y
+# Wide-character ncurses, as Debian (dArkMoss) has it: spruce's rnano and the
+# flip ffmpeg libraries want libncursesw.so.6 and libtinfo.so.6 (post-build.sh).
+BR2_PACKAGE_NCURSES=y
+BR2_PACKAGE_NCURSES_WCHAR=y
 BR2_PACKAGE_UTIL_LINUX=y
 BR2_PACKAGE_UTIL_LINUX_BINARIES=y
 BR2_PACKAGE_UTIL_LINUX_MOUNTPOINT=y
