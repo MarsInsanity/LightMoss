@@ -32,9 +32,18 @@ the space back to userdata):
 | GPT name | Size | |
 |---|---|---|
 | `userdata` | the rest | Android's data, 4 GiB smaller |
-| `LMBOOT` | 256 MiB | FAT32: `loader/loader.conf`, `loader/entries/lightmoss-{1,2}.conf`, `lightmoss-{1,2}/` (kernel, device tree, firmware initramfs), the flags |
-| `LMSYS1` | ~1.9 GiB | system copy 1 |
-| `LMSYS2` | ~1.9 GiB | system copy 2 |
+| `LMBOOT` | 512 MiB | FAT32: `loader/loader.conf`, `loader/entries/lightmoss-{1,2}.conf`, `lightmoss-{1,2}/` (kernel, device tree, firmware initramfs), the flags |
+| `LMSYS1` | ~1.75 GiB | system copy 1 |
+| `LMSYS2` | ~1.75 GiB | system copy 2 |
+
+`LMBOOT` is 512 MiB because OpenABL reads it through the firmware's FAT
+driver (edk2's EnhancedFatDxe), which refuses a FAT32 with fewer than 65525
+clusters, and the UFS has 4 KiB logical sectors: 256 MiB makes only 65376
+(Linux mounts it all the same; the card's `LMBOOT`, with 512-byte sectors,
+has 516190). The installer checks the FAT it made from its boot sector
+(`lm_fat_info` in `lib.sh`); an install made with the earlier 256 MiB
+layout is laid out again in the same 4 GiB by the next run, Android
+untouched.
 
 The names avoid Android's `_a`/`_b` suffixes, which Qualcomm's bootloader
 treats as slot partitions. The kernel finds its root by PARTUUID; LightMoss's
@@ -55,16 +64,33 @@ users. In short:
    abl_a/abl_b` with an unlocked bootloader.
 2. Flash the card image, boot it (OpenABL: Boot mode Linux, Boot source Auto).
 3. Create `lightmoss-install` on the card's `LMBOOT`, connect the charger and
-   boot it again: `lightmoss-install-internal` shrinks `userdata` by 4 GiB,
-   adds the three partitions, copies the running system to `LMSYS1`, writes
-   the boot entry and restarts into it. **Android's data is lost** (userdata
-   changes size, so Android formats it on its next start). Over SSH:
-   `lightmoss-install-internal`.
+   boot it again: `lightmoss-install-internal` clears the start of `userdata`
+   and shrinks it by 4 GiB, adds the three partitions, copies the running
+   system to `LMSYS1` and checks it, then writes the boot entry
+   (`lightmoss-1+3.conf`, kept by `lightmoss-bless`) and `loader.conf`, and
+   the device restarts into it. **Android's data is lost** (userdata changes
+   size, so Android formats it on its next start, as after `fastboot erase
+   userdata`). Over SSH: `lightmoss-install-internal` (charger or 30%
+   battery; it logs to the card's `lightmoss-install.log`).
 4. Put spruce on the card's `SPRUCEOS` partition, or format the card for spruce.
 
-Run again from a card, `lightmoss-install-internal` repairs an install
-(system copy 1 becomes the card's system). Another system's partitions behind
-userdata (ROCKNIX's) are only replaced with `--replace`.
+Nothing boots the internal storage until system copy 1 is complete, so an
+install that stops halfway (power cut, error) leaves the card starting, and
+the next run finishes it. Run again from a card (OpenABL: *Boot entries*,
+the entry marked "(card)"), `lightmoss-install-internal` repairs an install:
+system copy 1 becomes the card's system, keeping the installed one's machine
+ID, SSH host and user keys, NetworkManager connections and Bluetooth
+pairings; an `LMBOOT` or `LMSYS2` without a usable filesystem is formatted.
+Another system's partitions behind userdata (ROCKNIX's) are only replaced
+with `--replace` (the flag file `lightmoss-install-replace`), which also lays
+LightMoss's own out again; when they leave 4 GiB at the end, `userdata`
+keeps its size and Android its data.
+
+`board/rpminiv2/test-install-internal.sh` (as root, on a build host) runs
+the installer, the flag service, `firstboot` and `mount-spruce` under busybox
+against loop devices: a 4 KiB-sector "UFS" with the Mini V2's Android
+partition table, interrupted and repaired installs, the old layout,
+ROCKNIX's partitions, and LightMoss cards.
 
 ## Switching between LightMoss and Android
 
@@ -105,8 +131,11 @@ them is not in ROCKNIX's SM8250 kernel, so everything goes through files on
 - The audio routing of `hw:0,0` to the speakers (`WSA_CODEC_DMA_RX_0 Audio
   Mixer MultiMedia1`) and the jack switching, also while a game plays
   (4-lightmoss/0071 moves the open stream; `journalctl -u lightmoss-audio-jack`).
-- The installer on a real GPT (`sfdisk -N` on userdata, 4 KiB UFS sectors,
-  `sgdisk --resize-table`), and Android formatting userdata afterwards.
+- The installer on the real UFS (tested on 4 KiB-sector loop devices with
+  the device's table), OpenABL reading the 512 MiB FAT32 `LMBOOT` on it, and
+  Android formatting the cleared userdata by itself afterwards (Android's
+  `fs_mgr` formats a wiped `formattable` userdata; Retroid's fstab is not
+  checked).
 - Boot counting: OpenABL renaming `lightmoss-N+3.conf` on each try.
 
 ## Building

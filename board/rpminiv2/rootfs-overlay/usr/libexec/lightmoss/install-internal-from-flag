@@ -1,17 +1,30 @@
 #!/bin/sh
 # lightmoss-install-internal.service: the card's boot partition holds
-# lightmoss-install. With the charger connected, install LightMoss on the
-# internal storage and restart into it; the flag is renamed .done (or .failed,
-# with the reason in lightmoss-install.log next to it) so it runs once.
-# Without the charger it says so and the card starts as usual.
-. /usr/libexec/lightmoss/lib.sh
+#   lightmoss-install          install LightMoss on the internal storage, or
+#                              repair the install there;
+#   lightmoss-install-replace  the same, removing another system's partitions
+#                              behind Android's userdata first (ROCKNIX's, say).
+# (Either may end in .txt, as a PC may name it.) With the charger connected,
+# run lightmoss-install-internal and restart into the internal storage; the
+# flag is renamed .done (or .failed, with the reason in lightmoss-install.log
+# next to it) so it runs once. Without the charger it says so and the card
+# starts as usual.
+LM_ROOT="${LM_ROOT:-}"
+# shellcheck source=lib.sh
+. "$LM_ROOT/usr/libexec/lightmoss/lib.sh"
+B="$LM_ROOT/boot"
 
 case "$(lm_disk_type "$(lm_root_disk)")" in SD) ;; *) exit 0 ;; esac
 flag=""
-for f in /boot/lightmoss-install /boot/lightmoss-install.txt; do
-	[ -e "$f" ] && { flag="$f"; break; }
+for f in lightmoss-install lightmoss-install.txt lightmoss-install-replace lightmoss-install-replace.txt; do
+	[ -e "$B/$f" ] && { flag="$B/$f"; break; }
 done
 [ -n "$flag" ] || exit 0
+name="${flag%.txt}"
+case "$name" in
+	*-replace) replace=--replace ;;
+	*) replace="" ;;
+esac
 
 if ! lm_charger_online; then
 	lm_say "LightMoss can be installed on the internal storage:\n  connect the charger and restart.\n\n  Starting from the card for now..."
@@ -20,17 +33,24 @@ if ! lm_charger_online; then
 fi
 
 lm_say "Installing LightMoss on the internal storage...\n\n  Keep the charger connected and do not power off."
-if /usr/bin/lightmoss-install-internal --from-flag > /boot/lightmoss-install.log 2>&1; then
-	mv -f "$flag" "/boot/lightmoss-install.done"
+# shellcheck disable=SC2086 # $replace: one option or none
+if "$LM_ROOT/usr/bin/lightmoss-install-internal" --from-flag $replace > "$B/lightmoss-install.log" 2>&1; then
+	mv -f "$flag" "$name.done"
 	sync
-	lm_say "LightMoss is on the internal storage.\n\n  Android formats its data on its next start.\n\n  Restarting into LightMoss..."
+	msg="LightMoss is on the internal storage."
+	if grep -q "^Android's data was cleared" "$B/lightmoss-install.log"; then
+		msg="$msg\n\n  Android's data was cleared: Android sets\n  itself up again on its next start."
+	fi
+	lm_say "$msg\n\n  Restarting into LightMoss..."
 	sleep 8
 	systemctl reboot
 	sleep 60
 else
-	mv -f "$flag" "/boot/lightmoss-install.failed"
+	mv -f "$flag" "$name.failed"
 	sync
-	lm_say "The install did not complete:\n\n  $(tail -n 1 /boot/lightmoss-install.log)\n\n  (lightmoss-install.log on the card). Starting from the card..."
+	why="$(sed -n 's/^lightmoss-install-internal: //p' "$B/lightmoss-install.log" | tail -n 1)"
+	[ -n "$why" ] || why="$(tail -n 1 "$B/lightmoss-install.log")"
+	lm_say "The install did not complete:\n\n  $why\n\n  (lightmoss-install.log on the card). Starting from the card..."
 	sleep 12
 fi
 exit 0

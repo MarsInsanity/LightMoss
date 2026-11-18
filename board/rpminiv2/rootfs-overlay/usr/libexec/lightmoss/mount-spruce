@@ -9,15 +9,18 @@
 #   2. the SPRUCEOS partition behind the system on the card it runs from
 #      (lightmoss-firstboot made it).
 # The internal storage is never searched: its FAT partitions are Android's.
-# None after a retry: say so on the screen and power off.
-. /usr/libexec/lightmoss/lib.sh
+# A partition that was not cleanly unmounted (power cut, flat battery) is
+# checked and repaired first. None after a retry: say so on the screen and
+# power off.
+LM_ROOT="${LM_ROOT:-}"
+# shellcheck source=lib.sh
+. "$LM_ROOT/usr/libexec/lightmoss/lib.sh"
+SD="$LM_ROOT/mnt/SDCARD"
 
 candidates() {
 	root_disk="$(lm_root_disk)"
-	for d in /sys/block/mmcblk*; do
-		[ -e "$d" ] || continue
-		disk="${d##*/}"
-		case "$disk" in *boot*|*rpmb*) continue ;; esac
+	for disk in $(lm_card_disks); do
+		d="/sys/block/$disk"
 		if [ "$disk" != "$root_disk" ]; then
 			for p in "$d/$disk"*; do
 				[ -e "$p/partition" ] || continue
@@ -32,20 +35,42 @@ candidates() {
 	done
 }
 
+# Check the partition if it was not cleanly unmounted, then mount it. FAT
+# names are UTF-8 (the kernel's default for FAT is ASCII, which turns
+# "Pokémon" into "Pok?mon": unreadable, and such files cannot be made).
+mount_one() {
+	type="$(blkid -o value -s TYPE "$1" 2>/dev/null)"
+	opts=rw,noatime,umask=0000
+	[ "$type" != vfat ] || opts="$opts,utf8"
+	if lm_fs_dirty "$1" "$type"; then
+		echo "$1 was not cleanly unmounted: checking it"
+		lm_say "Checking the spruce card..."
+		case "$type" in
+			vfat)  timeout 600 fsck.fat -a -w "$1" ;;
+			exfat) timeout 600 fsck.exfat -p "$1" ;;
+		esac
+		echo "check of $1 ended with $?"
+		printf '\033[2J\033[H' > /dev/tty1 2>/dev/null
+	fi
+	mount ${type:+-t "$type"} -o "$opts" "$1" "$SD" 2>/dev/null
+}
+
+empty=""
 mount_spruce() {
-	mountpoint -q /mnt/SDCARD && [ -f /mnt/SDCARD/spruce/scripts/runtime.sh ] && return 0
+	mountpoint -q "$SD" && [ -f "$SD/spruce/scripts/runtime.sh" ] && return 0
 	for dev in $(candidates); do
-		mount -o rw,noatime,umask=0000 "$dev" /mnt/SDCARD 2>/dev/null || continue
-		if [ -f /mnt/SDCARD/spruce/scripts/runtime.sh ]; then
+		mount_one "$dev" || continue
+		if [ -f "$SD/spruce/scripts/runtime.sh" ]; then
 			echo "spruce found on $dev"
 			return 0
 		fi
-		umount /mnt/SDCARD
+		empty="$dev"
+		umount "$SD"
 	done
 	return 1
 }
 
-mkdir -p /mnt/SDCARD
+mkdir -p "$SD"
 mount_spruce && exit 0
 
 lm_say "Looking for the spruce card..."
@@ -55,9 +80,17 @@ if mount_spruce; then
 	exit 0
 fi
 
-lm_say "spruce card not found, shutting down"
-echo "spruce card not found, powering off" >&2
-sleep 3
+if [ -n "$empty" ]; then
+	# Typically the first start of a new LightMoss card: SPRUCEOS is there,
+	# but nothing has been copied onto it yet.
+	lm_say "spruce is not on the card yet.\n\n  Copy spruce onto the card's SPRUCEOS partition\n  (README-LightMoss.txt on the card says how),\n  then start again.\n\n  Shutting down..."
+	echo "no spruce on $empty (or any other partition), powering off" >&2
+	sleep 15
+else
+	lm_say "spruce card not found, shutting down"
+	echo "spruce card not found, powering off" >&2
+	sleep 3
+fi
 systemctl poweroff
 sleep 60
 exit 1
