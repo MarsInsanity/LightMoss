@@ -1,0 +1,28 @@
+[Unit]
+Description=Show spruce's output on the screen (debug boots)
+# With /boot/lightmoss-debug, which also leaves the text console bound
+# (console-blank). spruce's output itself always goes to the journal, so that
+# the debug export has it; this shows it on tty1 too, as it did before.
+ConditionPathExists=/boot/lightmoss-debug
+After=spruce-launch.service lightmoss-boot.service
+# Restarted for as long as the flag is there: spruce-launch hangs up tty1
+# when it stops or starts again, which ends journalctl.
+StartLimitIntervalSec=0
+
+[Service]
+# Kernel messages up to info level and systemd's status lines on the console
+# too, for the rest of this boot and the power-off (as r36s's debug boots
+# get from the kernel command line): a stall then shows what it is stuck on.
+ExecStartPre=-/bin/sh -c 'echo 7 > /proc/sys/kernel/printk; kill -s RTMIN+20 1'
+ExecStart=/usr/bin/journalctl --boot --follow --lines=20 --output=cat --unit=spruce-launch.service
+# systemd opens tty1 for writing only, without making it this service's
+# controlling terminal: spruce-launch must be able to take it.
+StandardInput=null
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty1
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -4,11 +4,13 @@ enable lightmoss-boot.service
 enable lightmoss-firstboot.service
 enable lightmoss-install-internal.service
 enable lightmoss-debug.service
+enable lightmoss-debug-console.service
 enable lightmoss-audio.service
 enable lightmoss-fan.service
 enable lightmoss-volkeys.service
 enable lightmoss-bless.service
 enable spruce-launch.service
+enable lightmoss-spruce-leftovers.service
 enable NetworkManager.service
 enable systemd-timesyncd.service
 

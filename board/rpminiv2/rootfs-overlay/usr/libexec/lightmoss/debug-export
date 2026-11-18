@@ -3,37 +3,91 @@
 # a PC can read them (off the card; on the internal storage, over SSH or from
 # a card's LightMoss). Off by default: an unclean power-off while /boot is
 # being written can dirty the FAT partition OpenABL boots from.
+#
+# Each export is a folder named <number>_<date>: 00012_20261118-120000. The
+# number counts up by one per export and decides which folders are kept, not
+# the date: the clock can come up wrong (the PMIC RTC once said 2075), and
+# going by the date in the name, or by the folders' times, would then throw
+# away the newest export instead of the oldest. Folders from before the
+# numbering (named by date alone) go first.
 FLAG=/boot/lightmoss-debug
 LOGDIR=/boot/logs
 KEEP=5
+# Each log copied from the card: its last 2 MB at most.
+TAIL=2000000
 
 [ -e "$FLAG" ] || exit 0
 mountpoint -q /boot || exit 0
+mkdir -p "$LOGDIR" || exit 0
+
+# A string of digits as a number (0 for anything else), without its leading
+# zeros: the shell would read 00012 as octal.
+number() {
+	case "$1" in
+		''|*[!0-9]*) echo 0 ;;
+		*) n=${1#"${1%%[!0]*}"}; echo "${n:-0}" ;;
+	esac
+}
+
+# A folder's export number, or 0 for one from before the numbering.
+folder_number() {
+	n=${1##*/}
+	case "$n" in
+		*_*) number "${n%%_*}" ;;
+		*) echo 0 ;;
+	esac
+}
+
+# The next number: one more than the counter and every folder's (the counter
+# alone could have been lost, the folders alone pruned or deleted by hand).
+last=0
+[ -f "$LOGDIR/.seq" ] && last=$(number "$(tr -cd 0-9 < "$LOGDIR/.seq")")
+for d in "$LOGDIR"/*/; do
+	[ -d "$d" ] || continue
+	n=$(folder_number "${d%/}")
+	[ "$n" -gt "$last" ] && last=$n
+done
+seq=$((last + 1))
+echo "$seq" > "$LOGDIR/.seq"
 
 STAMP=$(date +%Y%m%d-%H%M%S 2>/dev/null) || STAMP=unknown
-OUT="$LOGDIR/$STAMP"
+OUT="$LOGDIR/$(printf %05d "$seq")_$STAMP"
 mkdir -p "$OUT" || exit 0
 
 journalctl -b -1 --no-pager > "$OUT/previous-boot.log" 2>/dev/null
 journalctl -b 0 --no-pager  > "$OUT/this-boot.log"     2>/dev/null
 dmesg                       > "$OUT/dmesg.log"         2>/dev/null
+
+# Every mixer control with its value, per sound card (about 1300 on the SoC
+# card: too many for system.txt).
+for c in /proc/asound/card[0-9]*; do
+	[ -d "$c" ] || continue
+	amixer -c "${c##*card}" contents > "$OUT/mixer-card${c##*card}.txt" 2>&1
+done
+
+# One line per sysfs node: "name: value".
+show() {
+	for f in "$@"; do
+		[ -e "$f" ] && echo "$f: $(cat "$f" 2>/dev/null | tr '\n' ' ')"
+	done
+}
+
 {
 	echo "date:    $(date 2>/dev/null)"
 	echo "kernel:  $(uname -a 2>/dev/null)"
 	echo "cmdline: $(cat /proc/cmdline)"
 	echo "uptime:  $(uptime 2>/dev/null)"
+	echo "export:  $seq"
 	echo
-	# (A debug boot is slower than a plain one: the kernel and systemd print
-	# on the screen.)
 	echo "--- boot timing (seconds since the kernel started)"
 	us() { awk -v v="$1" -v l="$2" 'BEGIN { if (v > 0) printf "%8.3f  %s\n", v / 1000000, l }'; }
 	us "$(systemctl show -P UserspaceTimestampMonotonic)" "systemd started (root mounted)"
-	for u in sysinit.target basic.target NetworkManager.service multi-user.target; do
+	for u in sysinit.target basic.target NetworkManager.service lightmoss-audio.service multi-user.target; do
 		us "$(systemctl show -P ActiveEnterTimestampMonotonic "$u")" "$u up"
 	done
 	us "$(systemctl show -P InactiveExitTimestampMonotonic spruce-launch.service)" "spruce hand-off starts (mount-spruce)"
 	us "$(systemctl show -P ExecMainStartTimestampMonotonic spruce-launch.service)" "spruce's runtime.sh starts"
-	us "$(systemctl show -P FinishTimestampMonotonic)" "boot jobs all done"
+	echo "spruce restarts: $(systemctl show -P NRestarts spruce-launch.service)"
 	echo
 	echo "--- os-release"; cat /etc/os-release
 	echo; echo "--- block devices"; lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINT
@@ -41,24 +95,87 @@ dmesg                       > "$OUT/dmesg.log"         2>/dev/null
 	echo; echo "--- disk"; df -h
 	echo; echo "--- failed units"; systemctl --failed --no-pager
 	echo; echo "--- network"; ip addr; nmcli general 2>&1; nmcli device 2>&1
+	echo; echo "--- rfkill"
+	for r in /sys/class/rfkill/rfkill*; do
+		[ -e "$r/type" ] && echo "${r##*/}: $(cat "$r/name" "$r/type" 2>/dev/null | tr '\n' ' ')soft=$(cat "$r/soft" 2>/dev/null) hard=$(cat "$r/hard" 2>/dev/null)"
+	done
 	echo; echo "--- usb"; lsusb 2>&1
-	echo; echo "--- sound"; cat /proc/asound/cards; amixer controls 2>&1 | head -40
+	echo; echo "--- sound"; cat /proc/asound/cards
+	echo "headphones (lightmoss-audio): $(cat /run/lightmoss/headphones 2>/dev/null || echo -)"
+	for c in /proc/asound/card[0-9]*; do
+		[ -d "$c" ] || continue
+		n=${c##*card}
+		# The jacks are CARD controls, the route and gains MIXER ones.
+		amixer -c "$n" controls 2>/dev/null | grep "iface=CARD" | while IFS= read -r id; do
+			amixer -c "$n" cget "${id%%,*}" 2>/dev/null
+		done
+		for id in 'name=RX_CODEC_DMA_RX_0 Audio Mixer MultiMedia1' 'name=WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia1' \
+			'name=WSA_RX0 Digital Volume' 'name=WSA_RX1 Digital Volume' 'name=Master'; do
+			amixer -c "$n" cget "$id" 2>/dev/null
+		done
+		for p in "$c"/pcm*/sub0; do
+			[ -d "$p" ] || continue
+			echo "$p: $(cat "$p/status" 2>/dev/null | tr '\n' ' ')"
+			echo "$p: $(cat "$p/hw_params" 2>/dev/null | tr '\n' ' ')"
+		done
+	done
 	echo; echo "--- input"; cat /proc/bus/input/devices
 	echo; echo "--- suspend"; echo "states: $(cat /sys/power/state)"
-	cat /sys/kernel/debug/suspend_stats 2>&1
+	echo "mem_sleep: $(cat /sys/power/mem_sleep 2>/dev/null)"
+	show /sys/power/suspend_stats/* /sys/power/pm_wakeup_irq
 	echo; echo "--- wakeup sources"; cat /sys/kernel/debug/wakeup_sources 2>&1 | awk 'NR == 1 || $2 > 0'
+	echo; echo "--- thermal (millidegrees C)"
+	for z in /sys/class/thermal/thermal_zone*; do
+		[ -e "$z/type" ] || continue
+		trips=
+		for t in "$z"/trip_point_*_temp; do
+			[ -e "$t" ] && trips="$trips $(cat "${t%_temp}_type" 2>/dev/null)=$(cat "$t" 2>/dev/null)"
+		done
+		echo "${z##*/} $(cat "$z/type" 2>/dev/null): $(cat "$z/temp" 2>/dev/null) ($(cat "$z/policy" 2>/dev/null))${trips:+ trips:$trips}"
+	done
+	for d in /sys/class/thermal/cooling_device*; do
+		[ -e "$d/type" ] && echo "${d##*/} $(cat "$d/type" 2>/dev/null): $(cat "$d/cur_state" 2>/dev/null)/$(cat "$d/max_state" 2>/dev/null)"
+	done
+	echo; echo "--- fan and sensors (hwmon)"
+	for h in /sys/class/hwmon/hwmon*; do
+		[ -e "$h/name" ] || continue
+		echo "${h##*/} $(cat "$h/name" 2>/dev/null):"
+		show "$h"/pwm[0-9] "$h"/pwm[0-9]_enable "$h"/fan[0-9]_input "$h"/temp[0-9]_input
+	done
+	echo; echo "--- cpufreq"
+	for p in /sys/devices/system/cpu/cpufreq/policy*; do
+		[ -d "$p" ] || continue
+		echo "${p##*/} cpus $(cat "$p/related_cpus" 2>/dev/null): $(cat "$p/scaling_governor" 2>/dev/null)" \
+			"cur $(cat "$p/scaling_cur_freq" 2>/dev/null) min $(cat "$p/scaling_min_freq" 2>/dev/null)" \
+			"max $(cat "$p/scaling_max_freq" 2>/dev/null) (hardware $(cat "$p/cpuinfo_min_freq" 2>/dev/null)-$(cat "$p/cpuinfo_max_freq" 2>/dev/null))"
+	done
+	echo; echo "--- devfreq"
+	for d in /sys/class/devfreq/*; do
+		[ -e "$d/governor" ] || continue
+		echo "${d##*/}: $(cat "$d/governor" 2>/dev/null) cur $(cat "$d/cur_freq" 2>/dev/null)" \
+			"min $(cat "$d/min_freq" 2>/dev/null) max $(cat "$d/max_freq" 2>/dev/null)"
+	done
 	echo; echo "--- boot entries"; cat /boot/loader/loader.conf 2>&1; ls -l /boot/loader/entries 2>&1
 	echo; echo "--- partitions"; sfdisk -l 2>&1
 	echo; echo "--- drm"; cat /sys/class/drm/card*-DSI-*/modes 2>&1; ls /sys/class/backlight 2>&1
 	echo; echo "--- power supplies"; for p in /sys/class/power_supply/*; do echo "$p: $(cat "$p/type" "$p/online" "$p/capacity" "$p/status" 2>/dev/null | tr '\n' ' ')"; done
 	echo; echo "--- remote processors"; for r in /sys/class/remoteproc/*; do echo "$r: $(cat "$r/name" "$r/state" 2>/dev/null | tr '\n' ' ')"; done
+	echo; echo "--- modules"; lsmod 2>&1
 } > "$OUT/system.txt" 2>&1
 
-[ -f /mnt/SDCARD/Saves/spruce/spruce.log ] && cp -f /mnt/SDCARD/Saves/spruce/spruce.log "$OUT/" 2>/dev/null
+# spruce's own logs (their end, if they have grown large). Its standard output,
+# PyUI's and the emulators', is in the journals above.
+for f in /mnt/SDCARD/Saves/spruce/spruce.log /mnt/SDCARD/Saves/spruce/pyui.log \
+	/mnt/SDCARD/Saves/spruce/retroarch.log; do
+	[ -f "$f" ] && tail -c "$TAIL" "$f" > "$OUT/${f##*/}" 2>/dev/null
+done
 
 [ -f /boot/lightmoss-install.log ] && cp -f /boot/lightmoss-install.log "$OUT/" 2>/dev/null
 
-ls -1d "$LOGDIR"/*/ 2>/dev/null | sort | head -n "-$KEEP" | while read -r old; do
+# Keep the KEEP highest-numbered folders.
+for d in "$LOGDIR"/*/; do
+	[ -d "$d" ] && echo "$(folder_number "${d%/}") ${d%/}"
+done | sort -n -k1,1 | head -n "-$KEEP" | while read -r n old; do
 	rm -rf "$old"
 done
 sync
