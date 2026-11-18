@@ -12,7 +12,7 @@ BR2_BACKUP_SITE="https://sources.buildroot.net"
 BR2_CCACHE=y
 BR2_OPTIMIZE_2=y
 # Hashes for the kernel tarball and patches for buildroot's own packages
-# and this tree's (SDL2's and SDL3's panel rotation).
+# and this tree's (SDL2's, SDL3's and Mesa's Vulkan panel rotation).
 BR2_GLOBAL_PATCH_DIR="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/rpminiv2/patches"
 
 # --- Toolchain: glibc (PortMaster ports are glibc binaries) --------------------
@@ -85,7 +85,8 @@ BR2_PACKAGE_MESA3D_OPENGL_EGL=y
 BR2_PACKAGE_MESA3D_OPENGL_ES=y
 # Vulkan: Turnip (Mesa's freedreno Vulkan driver, this tree's option, see
 # Config.in) and the Khronos loader, libvulkan.so.1. Programs present
-# through VK_KHR_display. vulkaninfo, to check it on the device.
+# through VK_KHR_display; the panel is turned by Mesa as SDL turns it
+# (board/rpminiv2/patches/mesa3d). vulkaninfo, to check it on the device.
 BR2_LIGHTMOSS_MESA3D_TURNIP=y
 BR2_PACKAGE_VULKAN_LOADER=y
 BR2_PACKAGE_VULKAN_TOOLS=y
