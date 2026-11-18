@@ -1,0 +1,78 @@
+#!/bin/sh
+# End whatever is still running in spruce-launch.service's cgroup, but not
+# this script: spruce-leftovers [SECONDS] (default 5).
+#
+# spruce-launch.service has KillMode=process, so that save_poweroff.sh, which
+# kills runtime.sh, gets to finish the power-off. What runtime.sh started
+# (watchdogs, getevent, principal.sh, a game) stays behind in the cgroup.
+# This runs:
+# - first thing when spruce-launch starts: after a crash or a restart, a new
+#   runtime.sh must not run beside the old one's watchdogs and frontend;
+# - at shutdown (lightmoss-spruce-leftovers.service): before the filesystems
+#   are unmounted, which they could not be while spruce's processes kept the
+#   card, /tmp and /boot busy.
+# SIGTERM (and SIGCONT, for a game spruce stopped for sleep) first, so a game
+# can save; SIGKILL for what is left after SECONDS.
+UNIT=spruce-launch.service
+GRACE=${1:-5}
+
+# The unit's cgroup directory: ours when run as its ExecStartPre (cgroup v2
+# "0::/..." or v1's "name=systemd"), else the one systemd reports.
+cg=$(sed -n 's/^0:://p; s/^[0-9]*:name=systemd://p' /proc/self/cgroup 2>/dev/null | grep -m 1 "/$UNIT\$")
+[ -n "$cg" ] || cg=$(systemctl show -P ControlGroup "$UNIT" 2>/dev/null)
+[ -n "$cg" ] || cg=/system.slice/$UNIT
+dir=
+for root in /sys/fs/cgroup /sys/fs/cgroup/systemd /sys/fs/cgroup/unified; do
+	[ -r "$root$cg/cgroup.procs" ] && { dir=$root$cg; break; }
+done
+[ -n "$dir" ] || exit 0
+
+# The processes in it now, in $pids, but not this shell (as an ExecStartPre
+# it is in the cgroup too). Read by the shell itself, without starting a
+# process that would land in the cgroup and the list.
+alive() {
+	pids=
+	for f in "$dir/cgroup.procs" "$dir"/*/cgroup.procs; do
+		[ -r "$f" ] || continue
+		while read -r p; do
+			[ "$p" = "$$" ] && continue
+			[ -d "/proc/$p" ] && pids="$pids $p"
+		done < "$f"
+	done
+}
+names() {
+	for p in "$@"; do
+		printf '%s(%s) ' "$(cat "/proc/$p/comm" 2>/dev/null)" "$p"
+	done
+}
+
+alive
+# shellcheck disable=SC2086 # one PID per word
+set -- $pids
+[ $# -gt 0 ] || exit 0
+echo "spruce-leftovers: ending what $UNIT left running: $(names "$@")"
+kill -TERM "$@" 2>/dev/null
+kill -CONT "$@" 2>/dev/null
+
+n=0
+while [ "$n" -lt $((GRACE * 5)) ]; do
+	alive
+	# shellcheck disable=SC2086
+	set -- $pids
+	[ $# -gt 0 ] || exit 0
+	sleep 0.2
+	n=$((n + 1))
+done
+
+# Still there after the grace time (or started meanwhile): killed.
+tries=0
+while [ $# -gt 0 ] && [ "$tries" -lt 5 ]; do
+	echo "spruce-leftovers: killing $(names "$@")"
+	kill -KILL "$@" 2>/dev/null
+	sleep 0.2
+	alive
+	# shellcheck disable=SC2086
+	set -- $pids
+	tries=$((tries + 1))
+done
+exit 0

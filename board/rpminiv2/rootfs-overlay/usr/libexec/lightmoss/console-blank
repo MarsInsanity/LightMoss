@@ -6,8 +6,8 @@
 #
 # --restore binds it again: the power-off shutdown hook
 # (/usr/lib/systemd/system-shutdown/lightmoss-fbcon) runs it at the very end,
-# because with fbcon unbound an RK3326 power-off can stall for minutes in the
-# kernel.
+# because with fbcon unbound an RK3326 power-off could stall for minutes in
+# the kernel (unknown on the SM8250; bound, it ends like a debug boot's).
 BIND=0
 if [ "$1" = "--restore" ]; then
 	BIND=1

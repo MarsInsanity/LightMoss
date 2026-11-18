@@ -1,0 +1,11 @@
+#!/bin/sh
+# systemd-shutdown hook ($1 = poweroff, reboot, halt or kexec): bind fbcon to
+# the panel again once every process is gone and the filesystems are
+# unmounted, just before the power is cut, so nothing on screen changes
+# before then. console-blank unbinds it before spruce starts (not on debug
+# boots, which power off with it bound). On the RK3326 (r36s) a power-off
+# with fbcon unbound could stall for 1-5 minutes in the kernel; whether the
+# SM8250's msm driver would is unknown, and with it bound a non-debug
+# power-off ends the way the debug ones already do.
+[ "$1" = poweroff ] || exit 0
+exec /usr/libexec/lightmoss/console-blank --restore
