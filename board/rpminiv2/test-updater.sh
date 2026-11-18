@@ -382,6 +382,17 @@ mkdir "$R/tmp/spruce_boot_jobs_started"
 run "LM_BLESS_STEP=1 LM_BLESS_WAIT=60 LM_BLESS_STABLE=3 /usr/libexec/lightmoss/bless"
 check "kept once its runtime.sh ran for a while (rc=$RC)" '[ "$RC" = 0 ] && [ "$(entries)" = "lightmoss-1.conf lightmoss-2.conf " ] && [ ! -e "$R/test/reboot" ]'
 
+echo "Restarts only for a try OpenABL counted:"
+start 1
+mv "$EN/lightmoss-1.conf" "$EN/lightmoss-1+3.conf"
+unit activating 5 0
+run "LM_BLESS_STEP=1 /usr/libexec/lightmoss/bless"
+check "an entry OpenABL never counted (+3): no restart (rc=$RC)" '[ "$RC" = 1 ] && [ ! -e "$R/test/reboot" ] && grep -q "not a counted try" "$W/out"'
+mv "$EN/lightmoss-1+3.conf" "$EN/lightmoss-1+0-4.conf"
+run "LM_BLESS_STEP=1 /usr/libexec/lightmoss/bless"
+check "an entry past its last try (+0-4, nothing else to start): no restart" '[ "$RC" = 1 ] && [ ! -e "$R/test/reboot" ]'
+mv "$EN/lightmoss-1+0-4.conf" "$EN/lightmoss-1.conf"
+
 echo "Refused updates leave the device starting as before:"
 start 1
 before="$(entries) $(dflt)"
