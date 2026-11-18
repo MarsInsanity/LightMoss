@@ -190,7 +190,8 @@ keep() {
 keep_passwords() {
 	[ -f /etc/shadow ] && [ -f "$mnt/etc/shadow" ] && [ ! -L "$mnt/etc/shadow" ] && inside /etc/shadow || return 0
 	for _u in root spruce; do
-		_line="$(grep "^$_u:" /etc/shadow | head -n 1)" || continue
+		_line="$(grep "^$_u:" /etc/shadow | head -n 1)"
+		[ -n "$_line" ] || continue
 		grep -q "^$_u:" "$mnt/etc/shadow" || continue
 		[ "$(grep "^$_u:" "$mnt/etc/shadow" | head -n 1)" = "$_line" ] && continue
 		LINE="$_line" awk -F: -v u="$_u" '$1 == u { print ENVIRON["LINE"]; next } { print }' \
