@@ -2,7 +2,7 @@
 # Run by systemd around suspend ($1 = pre or post, $2 = suspend): spruce
 # sleeps with systemctl suspend, which starts suspend.target itself since
 # LightMoss has no logind. systemd runs every hook in this directory at the
-# same time (the stick lights and the fan have their own). The output goes to
+# same time (the stick lights have their own; the fan needs none). The output goes to
 # the journal, which lightmoss-debug exports to /boot/logs.
 STATE=/run/lightmoss-sleep
 NM=org.freedesktop.NetworkManager
