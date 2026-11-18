@@ -45,8 +45,14 @@ Switching
 
 Updates
    The LightMoss Update app in spruce downloads a release and writes it
-   to LightMoss's second system copy while the first runs. If the new one
-   does not start, the device goes back to the old one by itself.
+   to LightMoss's second system copy on the internal storage while the
+   first runs; your Wi-Fi networks, SSH keys and Bluetooth pairings come
+   along. If the new one does not start (or spruce does not come up on
+   it), the device restarts and, after three tries, goes back to the old
+   one by itself. LightMoss running from this card is not updated over
+   the air (the card has room for one copy). Never write a new card image
+   over a card whose SPRUCEOS holds your games and saves: it is erased.
+   Copy them off first, or use another card.
 
 Files you can create here (on the internal LMBOOT over SSH: /boot):
    lightmoss-debug      logs to logs/ at every start, spruce's text on screen
