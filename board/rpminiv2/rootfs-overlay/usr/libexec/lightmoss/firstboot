@@ -6,20 +6,41 @@
 #
 # On the internal storage there is no space to give: LightMoss's 4 GB are its
 # boot partition and two system copies.
-. /usr/libexec/lightmoss/lib.sh
+LM_ROOT="${LM_ROOT:-}"
+# shellcheck source=lib.sh
+. "$LM_ROOT/usr/libexec/lightmoss/lib.sh"
 
 done_flag() {
-	mkdir -p /var/lib/lightmoss
-	touch /var/lib/lightmoss/firstboot.done
+	mkdir -p "$LM_ROOT/var/lib/lightmoss"
+	touch "$LM_ROOT/var/lib/lightmoss/firstboot.done"
 	sync
+}
+
+# No filesystem on the partition, and that for sure: blkid finds no type
+# (nor several, which it calls ambivalent), and the start of the partition
+# reads fine (blkid finds no type either when it cannot read).
+no_filesystem() {
+	_t="$(blkid -p -o value -s TYPE "$1" 2>/dev/null)"
+	_rc=$?
+	[ -z "$_t" ] && { [ "$_rc" = 0 ] || [ "$_rc" = 2 ]; } &&
+		dd if="$1" of=/dev/null bs=1M count=1 2>/dev/null
 }
 
 disk="$(lm_root_disk)" || exit 1
 [ "$(lm_disk_type "$disk")" = SD ] || { done_flag; exit 0; }
 dev="/dev/$disk"
 
-# Already there (a card set up by hand, or a second first boot).
-if lm_part_named "$disk" SPRUCEOS >/dev/null; then
+# Already there (a card set up by hand, or a second first boot). A first boot
+# that stopped between making it and formatting it left it with no
+# filesystem, which mount-spruce cannot use: format it now (only this script
+# makes a SPRUCEOS on a LightMoss card, so there is nothing in it to lose).
+if p="$(lm_part_named "$disk" SPRUCEOS)"; then
+	if no_filesystem "$p"; then
+		lm_say "First boot: setting up the card..."
+		echo "SPRUCEOS ($p) has no filesystem: formatting it"
+		mkfs.exfat -L SPRUCEOS "$p" || exit 1
+		printf '\033[2J\033[H' > /dev/tty1 2>/dev/null
+	fi
 	done_flag
 	exit 0
 fi
@@ -48,11 +69,20 @@ echo "creating SPRUCEOS: $dev from sector $start, $((free / 2048)) MB"
 # kernel about just this partition instead of re-reading the whole table.
 echo "start=$start, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name=SPRUCEOS" |
 	sfdisk --append --no-reread --no-tell-kernel "$dev" || exit 1
-n="$(sfdisk -l -o Device "$dev" 2>/dev/null | grep -c "^$dev")"
+# Its number as the table has it (the first free entry, which need not be
+# the count of partitions on a card partitioned by hand).
+n="$(sfdisk -d "$dev" 2>/dev/null | sed -n 's/^[^ ]*[^0-9]\([0-9][0-9]*\) *:.*name="SPRUCEOS".*/\1/p' | head -n 1)"
+[ -n "$n" ] || { echo "SPRUCEOS is not in the partition table" >&2; exit 1; }
 partx --add --nr "$n" "$dev" 2>/dev/null || partx --update --nr "$n" "$dev"
 p="$(lm_part "$disk" "$n")"
 i=0
 while [ ! -b "$p" ] && [ "$i" -lt 20 ]; do sleep 0.5; i=$((i + 1)); done
+# Never format anything but the partition just made (sysfs counts 512-byte
+# sectors, as the card has).
+if [ "$(cat "/sys/class/block/${p#/dev/}/start" 2>/dev/null)" != "$start" ]; then
+	echo "$p does not start at sector $start: not formatting it" >&2
+	exit 1
+fi
 mkfs.exfat -L SPRUCEOS "$p" || exit 1
 printf '\033[2J\033[H' > /dev/tty1 2>/dev/null
 done_flag
