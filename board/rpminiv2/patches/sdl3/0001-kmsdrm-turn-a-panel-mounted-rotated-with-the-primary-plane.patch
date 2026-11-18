@@ -25,11 +25,15 @@ render into buffers of that size, which the plane scans out turned.
   i-th primary), else the first usable one. It is also the display
   plane of the atomic path. If it cannot rotate, nothing is turned.
 - It is turned with drmModeObjectSetProperty() when the surfaces are
-  created, before the first frame's drmModeSetCrtc(), and every atomic
-  request for it carries the same "rotation". It is turned upright
-  again (in the atomic restore's request, and before the legacy
-  drmModeSetCrtc() of the console's configuration) when they are
-  destroyed, so the next program finds it as it was.
+  created, before the first frame's drmModeSetCrtc(), and turned
+  upright again before the console's configuration is restored with
+  drmModeSetCrtc() when they are destroyed, so the next program finds
+  it as it was.
+- A turned panel takes the legacy path (drmModeSetCrtc, then
+  drmModePageFlip, on the turned plane) unless SDL_KMSDRM_ATOMIC=1 asks
+  for atomic: the mechanism SDL2's patch uses, so one device check
+  covers both. With atomic, every request for the plane carries the
+  same "rotation" (0 in the restore's request).
 - The desktop mode, the mode list, the GBM surfaces and the RESIZED
   events have their sides swapped for 90 and 270.
 - The cursor plane is not turned: the cursor's image is turned in
@@ -204,10 +208,10 @@ index 1cee269..134f8f0 100644
                  return SDL_SetError("drmModeMoveCursor() failed: %s", strerror(-rc));
              }
 diff --git a/src/video/kmsdrm/SDL_kmsdrmvideo.c b/src/video/kmsdrm/SDL_kmsdrmvideo.c
-index 22b1b43..68cecc8 100644
+index 22b1b43..19531b0 100644
 --- a/src/video/kmsdrm/SDL_kmsdrmvideo.c
 +++ b/src/video/kmsdrm/SDL_kmsdrmvideo.c
-@@ -431,8 +431,14 @@ bool setup_plane(SDL_VideoDevice *_this, SDL_DisplayData *dispdata, KMSDRM_plane
+@@ -431,8 +431,15 @@ bool setup_plane(SDL_VideoDevice *_this, SDL_DisplayData *dispdata, KMSDRM_plane
          goto cleanup;
      }
  
@@ -217,6 +221,7 @@ index 22b1b43..68cecc8 100644
 +       (LightMoss): the plane that turns it, the CRTC's own primary plane,
 +       which the legacy drmModeSetCrtc() of the first frame also uses. */
 +    if (plane_type == DRM_PLANE_TYPE_PRIMARY && dispdata->rot_plane_id) {
++        KMSDRM_drmSetClientCap(viddata->drm_fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
 +        plane_id = dispdata->rot_plane_id;
 +    } else {
 +        plane_id = get_plane_id(_this, dispdata->crtc.crtc->crtc_id, plane_type);
@@ -224,7 +229,7 @@ index 22b1b43..68cecc8 100644
  
      if (!plane_id) {
          ret = SDL_SetError("Invalid Plane ID");
-@@ -522,6 +528,13 @@ drm_atomic_set_plane_props(SDL_DisplayData *dispdata, struct KMSDRM_PlaneInfo *i
+@@ -522,6 +529,13 @@ drm_atomic_set_plane_props(SDL_DisplayData *dispdata, struct KMSDRM_PlaneInfo *i
      add_plane_property(dispdata->atomic_req, info->plane, "CRTC_H", info->crtc_h);
      add_plane_property(dispdata->atomic_req, info->plane, "CRTC_X", info->crtc_x);
      add_plane_property(dispdata->atomic_req, info->plane, "CRTC_Y", info->crtc_y);
@@ -238,7 +243,7 @@ index 22b1b43..68cecc8 100644
  }
  
  int drm_atomic_commit(SDL_VideoDevice *_this, SDL_DisplayData *dispdata, bool blocking, bool allow_modeset)
-@@ -1068,35 +1081,230 @@ static bool KMSDRM_CrtcGetVrr(uint32_t drm_fd, uint32_t crtc_id)
+@@ -1068,35 +1082,230 @@ static bool KMSDRM_CrtcGetVrr(uint32_t drm_fd, uint32_t crtc_id)
      return false;
  }
  
@@ -491,7 +496,7 @@ index 22b1b43..68cecc8 100644
  }
  
  /* Gets a DRM connector, builds an SDL_Display with it, and adds it to the
-@@ -1269,6 +1477,9 @@ static void KMSDRM_AddDisplay(SDL_VideoDevice *_this, drmModeConnector *conn, dr
+@@ -1269,6 +1478,9 @@ static void KMSDRM_AddDisplay(SDL_VideoDevice *_this, drmModeConnector *conn, dr
      dispdata->connector.connector = conn;
      dispdata->crtc.crtc = crtc;
  
@@ -501,7 +506,7 @@ index 22b1b43..68cecc8 100644
      // save previous vrr state
      dispdata->saved_vrr = KMSDRM_CrtcGetVrr(viddata->drm_fd, crtc->crtc_id);
      // try to enable vrr
-@@ -1326,8 +1537,8 @@ static void KMSDRM_AddDisplay(SDL_VideoDevice *_this, drmModeConnector *conn, dr
+@@ -1326,8 +1538,8 @@ static void KMSDRM_AddDisplay(SDL_VideoDevice *_this, drmModeConnector *conn, dr
      modedata->mode_index = mode_index;
  
      display.internal = dispdata;
@@ -512,7 +517,7 @@ index 22b1b43..68cecc8 100644
      CalculateRefreshRate(&dispdata->mode, &display.desktop_mode.refresh_rate_numerator, &display.desktop_mode.refresh_rate_denominator);
      display.desktop_mode.format = SDL_PIXELFORMAT_ARGB8888;
      display.desktop_mode.internal = modedata;
-@@ -1342,7 +1553,7 @@ static void KMSDRM_AddDisplay(SDL_VideoDevice *_this, drmModeConnector *conn, dr
+@@ -1342,7 +1554,7 @@ static void KMSDRM_AddDisplay(SDL_VideoDevice *_this, drmModeConnector *conn, dr
          goto cleanup;
      }
  
@@ -521,7 +526,40 @@ index 22b1b43..68cecc8 100644
      display_properties = SDL_GetDisplayProperties(display_id);
      SDL_SetNumberProperty(display_properties, SDL_PROP_DISPLAY_KMSDRM_PANEL_ORIENTATION_NUMBER, orientation);
  
-@@ -1652,6 +1863,9 @@ static void KMSDRM_DestroySurfaces(SDL_VideoDevice *_this, SDL_Window *window)
+@@ -1414,9 +1626,12 @@ static void KMSDRM_SortDisplays(SDL_VideoDevice *_this)
+     }
+ }
+ 
+-static bool set_client_atomic_caps(int fd)
++/* atomic_default (LightMoss): whether atomic is used when SDL_KMSDRM_ATOMIC
++   is not set. Off for a turned panel, which then takes the legacy path
++   (drmModeSetCrtc/drmModePageFlip on the turned primary plane), as SDL2. */
++static bool set_client_atomic_caps(int fd, bool atomic_default)
+ {
+-    if (!SDL_GetHintBoolean(SDL_HINT_KMSDRM_ATOMIC, true)) {
++    if (!SDL_GetHintBoolean(SDL_HINT_KMSDRM_ATOMIC, atomic_default)) {
+         return false;  // emergency escape hatch.
+     } else if (KMSDRM_drmSetClientCap(fd, DRM_CLIENT_CAP_ATOMIC, 1)) {
+         return false;  // no atomic modesetting support.
+@@ -1454,7 +1669,7 @@ static bool KMSDRM_InitDisplays(SDL_VideoDevice *_this)
+     SDL_LogDebug(SDL_LOG_CATEGORY_VIDEO, "Opened DRM FD (%d)", viddata->drm_fd);
+ 
+     // Set ATOMIC & UNIVERSAL PLANES compatibility
+-    viddata->is_atomic = set_client_atomic_caps(viddata->drm_fd);
++    viddata->is_atomic = set_client_atomic_caps(viddata->drm_fd, true);
+ 
+     SDL_LogDebug(SDL_LOG_CATEGORY_VIDEO, "DRM FD (%d) %s atomic", viddata->drm_fd, viddata->is_atomic ? "SUPPORTS" : "DOES NOT SUPPORT");
+ 
+@@ -1546,7 +1761,7 @@ static bool KMSDRM_GBMInit(SDL_VideoDevice *_this, SDL_DisplayData *dispdata)
+         }
+     }
+ 
+-    viddata->is_atomic = set_client_atomic_caps(viddata->drm_fd);
++    viddata->is_atomic = set_client_atomic_caps(viddata->drm_fd, !dispdata->rot_plane_id);
+ 
+     // Set the FD as current DRM master.
+     KMSDRM_drmSetMaster(viddata->drm_fd);
+@@ -1652,6 +1867,9 @@ static void KMSDRM_DestroySurfaces(SDL_VideoDevice *_this, SDL_Window *window)
  #endif
  
  #if 1
@@ -531,7 +569,7 @@ index 22b1b43..68cecc8 100644
          /************************************************************/
          /* Make the display plane point to the original TTY buffer. */
          /* We have to configure it's input and output scaling       */
-@@ -1681,6 +1895,9 @@ static void KMSDRM_DestroySurfaces(SDL_VideoDevice *_this, SDL_Window *window)
+@@ -1681,6 +1899,9 @@ static void KMSDRM_DestroySurfaces(SDL_VideoDevice *_this, SDL_Window *window)
      // original video mode and make it point to the original TTY buffer.
      /************************************************************************/
  
@@ -541,7 +579,7 @@ index 22b1b43..68cecc8 100644
      ret = KMSDRM_drmModeSetCrtc(viddata->drm_fd, dispdata->crtc.crtc->crtc_id,
                                  dispdata->crtc.crtc->buffer_id, 0, 0, &dispdata->connector.connector->connector_id, 1,
                                  &dispdata->original_mode);
-@@ -1763,7 +1980,8 @@ static void KMSDRM_DirtySurfaces(SDL_Window *window)
+@@ -1763,7 +1984,8 @@ static void KMSDRM_DirtySurfaces(SDL_Window *window)
         or SetWindowFullscreen, send a fake event for now since the actual
         recreation is deferred */
      KMSDRM_GetModeToSet(window, &mode);
@@ -551,7 +589,7 @@ index 22b1b43..68cecc8 100644
  }
  
  /* This determines the size of the fb, which comes from the GBM surface
-@@ -1814,6 +2032,10 @@ bool KMSDRM_CreateSurfaces(SDL_VideoDevice *_this, SDL_Window *window)
+@@ -1814,6 +2036,10 @@ bool KMSDRM_CreateSurfaces(SDL_VideoDevice *_this, SDL_Window *window)
          KMSDRM_DestroySurfaces(_this, window);
      }
  
@@ -562,7 +600,7 @@ index 22b1b43..68cecc8 100644
      bool tried_setting_format = false;
      const uint32_t surface_flags = GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING;
      for (int i = 0; i < SDL_arraysize(gbm_formats); i++) {
-@@ -1836,10 +2058,10 @@ bool KMSDRM_CreateSurfaces(SDL_VideoDevice *_this, SDL_Window *window)
+@@ -1836,10 +2062,10 @@ bool KMSDRM_CreateSurfaces(SDL_VideoDevice *_this, SDL_Window *window)
           */
          KMSDRM_GetModeToSet(window, &dispdata->mode);
  
@@ -575,7 +613,7 @@ index 22b1b43..68cecc8 100644
          }
          if (!windata->gs) {
              SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "KMSDRM: gbm_surface_create(GBM_FORMAT_%s) failed.", gbm_formats[i].name);
-@@ -1876,7 +2098,7 @@ bool KMSDRM_CreateSurfaces(SDL_VideoDevice *_this, SDL_Window *window)
+@@ -1876,7 +2102,7 @@ bool KMSDRM_CreateSurfaces(SDL_VideoDevice *_this, SDL_Window *window)
  
          result = true;
  
@@ -584,7 +622,7 @@ index 22b1b43..68cecc8 100644
  
          break;
      }
-@@ -1994,8 +2216,8 @@ bool KMSDRM_GetDisplayModes(SDL_VideoDevice *_this, SDL_VideoDisplay *display)
+@@ -1994,8 +2220,8 @@ bool KMSDRM_GetDisplayModes(SDL_VideoDevice *_this, SDL_VideoDisplay *display)
          }
  
          SDL_zero(mode);
