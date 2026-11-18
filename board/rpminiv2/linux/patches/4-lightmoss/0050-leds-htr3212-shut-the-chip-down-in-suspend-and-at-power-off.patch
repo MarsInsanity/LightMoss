@@ -1,0 +1,118 @@
+From 584abe41a622b9a9271284e361ad6f9347ac3e14 Mon Sep 17 00:00:00 2001
+From: LightMoss <noreply@github.com>
+Date: Wed, 18 Nov 2026 14:40:58 +0000
+Subject: [PATCH] leds: htr3212: shut the chip down in suspend and at power-off
+
+The driver had no power management: in suspend the LED core turned
+the channels off, but the chip stayed in normal operation with SDB
+high, and its vdd (vreg_mcu_3v3, an always-on rail) stays on, so both
+controllers kept drawing their operating current while the system
+slept. At power-off and reboot nothing turned the stick lights off
+either.
+
+Suspend now puts the chip in software shutdown and drops SDB; resume
+raises SDB and programs the chip as probe does, after which the LED
+core writes every channel's brightness back. Shutdown resets the
+chip, drops SDB and ignores later brightness writes.
+---
+ drivers/leds/leds-htr3212.c | 60 +++++++++++++++++++++++++++++++++++++
+ 1 file changed, 60 insertions(+)
+
+diff --git a/drivers/leds/leds-htr3212.c b/drivers/leds/leds-htr3212.c
+index e9367c4aa..16b23b470 100644
+--- a/drivers/leds/leds-htr3212.c
++++ b/drivers/leds/leds-htr3212.c
+@@ -38,6 +38,7 @@ struct htr3212_priv {
+ 	unsigned int num_leds;
+ 	struct gpio_desc *sdb;
+ 	struct regulator *vdd;
++	bool shut_down;
+ 	struct htr3212_led_data leds[];
+ };
+ 
+@@ -66,6 +67,10 @@ static int htr3212_brightness_set(struct led_classdev *led_cdev,
+ 
+ 	dev_dbg(led_cdev->dev, "%s: %d\n", __func__, brightness);
+ 
++	/* After .shutdown the chip is off and the bus may be gone. */
++	if (led_data->priv->shut_down)
++		return 0;
++
+ 	pwm_register_offset = led_data->channel - 1;
+ 
+ 	ret = htr3212_write(led_data->priv,
+@@ -274,6 +279,59 @@ static void htr3212_remove(struct i2c_client *client)
+ 	regulator_disable(priv->vdd);
+ }
+ 
++/*
++ * The LED core has already turned every channel off (the LEDs are
++ * LED_CORE_SUSPENDRESUME, and their class devices suspend before this,
++ * their parent). vdd stays on in suspend: vreg_mcu_3v3 is always-on.
++ * So put the chip in software shutdown and drop SDB, leaving it at its
++ * shutdown current instead of its operating current while the system sleeps.
++ */
++static int htr3212_suspend(struct device *dev)
++{
++	struct htr3212_priv *priv = dev_get_drvdata(dev);
++
++	htr3212_write(priv, HTR3212_SHUTDOWN, 0x00);
++	gpiod_set_value_cansleep(priv->sdb, 0);
++
++	return 0;
++}
++
++/*
++ * Wake the chip and program it as probe does. The LED core then writes
++ * every channel's brightness back as the class devices resume.
++ */
++static int htr3212_resume(struct device *dev)
++{
++	struct htr3212_priv *priv = dev_get_drvdata(dev);
++	int ret;
++
++	gpiod_set_value_cansleep(priv->sdb, 1);
++	usleep_range(10000, 11000);
++
++	ret = htr3212_init_regs(priv);
++	if (ret)
++		dev_err(dev, "failed to reinitialise after resume (%pe)\n",
++			ERR_PTR(ret));
++
++	return 0;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(htr3212_pm_ops, htr3212_suspend,
++				htr3212_resume);
++
++/* Dark at power-off and reboot, whatever userspace left lit. */
++static void htr3212_shutdown(struct i2c_client *client)
++{
++	struct htr3212_priv *priv = i2c_get_clientdata(client);
++
++	if (!priv)
++		return;
++
++	htr3212_reset_regs(priv);
++	gpiod_set_value_cansleep(priv->sdb, 0);
++	priv->shut_down = true;
++}
++
+ static const struct i2c_device_id htr3212_id[] = {
+ 	{ "htr3212" },
+ 	{},
+@@ -285,9 +343,11 @@ static struct i2c_driver htr3212_driver = {
+ 	.driver = {
+ 		.name	= "htr3212",
+ 		.of_match_table = of_htr3212_match,
++		.pm	= pm_sleep_ptr(&htr3212_pm_ops),
+ 	},
+ 	.probe		= htr3212_probe,
+ 	.remove		= htr3212_remove,
++	.shutdown	= htr3212_shutdown,
+ 	.id_table	= htr3212_id,
+ };
+ 
+-- 
+2.43.0
+
