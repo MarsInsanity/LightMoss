@@ -1,0 +1,149 @@
+From af0b34842c27aac0e3f625cc58d390c672368109 Mon Sep 17 00:00:00 2001
+From: LightMoss <noreply@github.com>
+Date: Wed, 18 Nov 2026 14:29:29 +0000
+Subject: [PATCH 2/2] ASoC: qdsp6: q6routing: move an open stream when its
+ route changes
+
+A frontend's ASM session is mapped to its backend port's COPP only when
+the stream is prepared (q6routing_stream_open). Changing the
+'<backend> Audio Mixer MultiMediaN' switches while the frontend is open
+makes DPCM stop the old backend and start the new one, but the session
+stays mapped to the old port's COPP: it keeps playing into a stopped
+AFE port and the new output is silent until the program closes and
+reopens its PCM. On a handheld that switches one PCM between speakers
+and headphones by the jack, every program that holds its PCM open (a
+menu, a game) goes silent when headphones are plugged in or out.
+
+After DPCM has started the new backend, open a COPP on its port with the
+port's configuration, map the session to it and close the session's old
+COPPs, which is what stream_open does for a new stream and what the
+downstream routing driver does on a live route change. The perf mode a
+stream was opened with is now remembered for this, and stream_close
+takes the routing lock so it cannot race the remap.
+---
+ sound/soc/qcom/qdsp6/q6routing.c | 81 ++++++++++++++++++++++++++++++++
+ 1 file changed, 81 insertions(+)
+
+diff --git a/sound/soc/qcom/qdsp6/q6routing.c b/sound/soc/qcom/qdsp6/q6routing.c
+index 738622604..f6b61ab1b 100644
+--- a/sound/soc/qcom/qdsp6/q6routing.c
++++ b/sound/soc/qcom/qdsp6/q6routing.c
+@@ -383,6 +383,7 @@ int q6routing_stream_open(int fedai_id, int perf_mode,
+ 
+ 	mutex_lock(&routing_data->lock);
+ 	session->fedai_id = fedai_id;
++	session->perf_mode = perf_mode;
+ 
+ 	session->path_type = pdata->path_type;
+ 	session->sample_rate = pdata->sample_rate;
+@@ -453,6 +454,7 @@ void q6routing_stream_close(int fedai_id, int stream_type)
+ 	if (!session)
+ 		return;
+ 
++	mutex_lock(&routing_data->lock);
+ 	for_each_set_bit(idx, &session->copp_map, MAX_COPPS_PER_PORT) {
+ 		if (session->copps[idx]) {
+ 			q6adm_close(routing_data->dev, session->copps[idx]);
+@@ -462,6 +464,7 @@ void q6routing_stream_close(int fedai_id, int stream_type)
+ 
+ 	session->fedai_id = -1;
+ 	session->copp_map = 0;
++	mutex_unlock(&routing_data->lock);
+ }
+ EXPORT_SYMBOL_GPL(q6routing_stream_close);
+ 
+@@ -484,6 +487,83 @@ static int msm_routing_get_audio_mixer(struct snd_kcontrol *kcontrol,
+ 	return 0;
+ }
+ 
++/*
++ * Move a session that is already streaming to the port it was just routed to.
++ *
++ * The session-to-COPP matrix is only programmed when the stream is prepared
++ * (q6routing_stream_open). When the mixer moves an open frontend to another
++ * backend, DPCM stops the old backend and starts the new one, but the ASM
++ * session stays mapped to the old port's COPP: the stream plays on into a
++ * stopped port and the new output is silent until the program closes and
++ * reopens its PCM (a headphone jack that switches the output, for example).
++ * Open a COPP on the new port and map the session to it, as stream_open would
++ * have, then drop the old COPPs. Called after DPCM has started the new
++ * backend, so its port is configured (port_data) and running.
++ */
++static void msm_routing_remap_session(struct msm_routing_data *data,
++				      int session_id, int be_id)
++{
++	struct session_data *session = &data->sessions[session_id];
++	struct session_data *pdata = &data->port_data[be_id];
++	struct q6copp *copps[MAX_COPPS_PER_PORT];
++	unsigned long old_map;
++	struct route_payload payload;
++	struct q6copp *copp;
++	int idx;
++
++	mutex_lock(&data->lock);
++
++	/* Not streaming (nothing is mapped yet), or routed elsewhere again. */
++	if (!session->copp_map || session->port_id != be_id)
++		goto out;
++
++	if (!pdata->sample_rate) {
++		dev_err(data->dev, "MultiMedia%d: port %d not configured, cannot move the stream\n",
++			session_id + 1, be_id);
++		goto out;
++	}
++
++	copp = q6adm_open(data->dev, be_id, pdata->path_type,
++			  pdata->sample_rate, pdata->channels,
++			  NULL_COPP_TOPOLOGY, session->perf_mode,
++			  pdata->bits_per_sample, 0, 0);
++	if (IS_ERR_OR_NULL(copp)) {
++		dev_err(data->dev, "MultiMedia%d: no COPP on port %d, the stream stays where it was\n",
++			session_id + 1, be_id);
++		goto out;
++	}
++
++	old_map = session->copp_map;
++	memcpy(copps, session->copps, sizeof(copps));
++	memset(session->copps, 0, sizeof(session->copps));
++
++	idx = q6adm_get_copp_id(copp);
++	session->copp_map = 0;
++	set_bit(idx, &session->copp_map);
++	session->copps[idx] = copp;
++	session->path_type = pdata->path_type;
++	session->sample_rate = pdata->sample_rate;
++	session->channels = pdata->channels;
++	session->bits_per_sample = pdata->bits_per_sample;
++
++	memset(&payload, 0, sizeof(payload));
++	payload.num_copps = 1;
++	payload.port_id[0] = be_id;
++	payload.copp_idx[0] = idx;
++	payload.session_id = session_id + 1;
++	if (q6adm_matrix_map(data->dev, pdata->path_type, payload,
++			     session->perf_mode))
++		dev_err(data->dev, "MultiMedia%d: could not map the stream to port %d\n",
++			session_id + 1, be_id);
++
++	for_each_set_bit(idx, &old_map, MAX_COPPS_PER_PORT) {
++		if (copps[idx])
++			q6adm_close(data->dev, copps[idx]);
++	}
++out:
++	mutex_unlock(&data->lock);
++}
++
+ static int msm_routing_put_audio_mixer(struct snd_kcontrol *kcontrol,
+ 				       struct snd_ctl_elem_value *ucontrol)
+ {
+@@ -503,6 +583,7 @@ static int msm_routing_put_audio_mixer(struct snd_kcontrol *kcontrol,
+ 
+ 		session->port_id = be_id;
+ 		snd_soc_dapm_mixer_update_power(dapm, kcontrol, 1, update);
++		msm_routing_remap_session(data, session_id, be_id);
+ 	} else {
+ 		if (session->port_id == -1 || session->port_id != be_id)
+ 			return 0;
+-- 
+2.43.0
+
