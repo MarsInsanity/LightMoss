@@ -1,0 +1,13 @@
+[Unit]
+Description=Fan mode (lightmoss-fan: auto, quiet, performance, max or off)
+
+# Sets the fan's thermal trips for the saved mode and exits; the kernel drives
+# the fan. Keeps running only if no thermal zone drives the fan, to drive it.
+[Service]
+Type=simple
+ExecStart=/usr/bin/lightmoss-fan apply --wait
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
