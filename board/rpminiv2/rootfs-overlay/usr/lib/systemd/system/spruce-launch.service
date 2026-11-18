@@ -8,6 +8,8 @@ Description=Hand off to spruce
 # there is no mount unit for it.
 After=local-fs.target systemd-udev-trigger.service alsa-restore.service alsa-state.service
 After=lightmoss-audio.service lightmoss-volkeys.service NetworkManager.service lightmoss-firstboot.service lightmoss-install-internal.service
+# lightmoss-audio is a oneshot: spruce opens hw:0,0 only once it is routed.
+Wants=lightmoss-audio.service
 
 [Service]
 Type=simple

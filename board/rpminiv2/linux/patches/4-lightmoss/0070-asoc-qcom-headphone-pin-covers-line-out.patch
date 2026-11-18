@@ -1,0 +1,43 @@
+From f638d9fbae3bddfd6d1c7a42703beb6d5da58344 Mon Sep 17 00:00:00 2001
+From: LightMoss <noreply@github.com>
+Date: Wed, 18 Nov 2026 14:29:28 +0000
+Subject: [PATCH 1/2] ASoC: qcom: the headphone pin covers line-out loads too
+
+wcd-mbhc reports a plug whose two channels both measure above linein_th
+(5 kOhm on the WCD938x) as SND_JACK_LINEOUT rather than a headphone: a
+cable into an amplifier's line input, or high-impedance headphones. The
+"Headphone Jack" pin only had SND_JACK_HEADPHONE in its mask, so for
+such a plug DAPM kept the pin off and never powered the HPH amplifiers,
+and the pin's ALSA control (what userspace follows to pick the output)
+stayed off: the speakers kept playing and the jack stayed silent.
+
+The line-out load is driven by the same HPH outputs, so let the pin
+cover SND_JACK_LINEOUT as well.
+---
+ sound/soc/qcom/common.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/sound/soc/qcom/common.c b/sound/soc/qcom/common.c
+index edc461169..576e9436a 100644
+--- a/sound/soc/qcom/common.c
++++ b/sound/soc/qcom/common.c
+@@ -179,8 +179,15 @@ static struct snd_soc_jack_pin qcom_headset_jack_pins[] = {
+ 		.mask = SND_JACK_MICROPHONE,
+ 	},
+ 	{
++		/*
++		 * wcd-mbhc reports a high-impedance load (both channels above
++		 * its linein_th) as SND_JACK_LINEOUT instead of a headphone.
++		 * The same HPH outputs drive it, so the pin must be on for it
++		 * too: otherwise DAPM leaves the headphone amplifiers off and
++		 * a line-in cable or high-impedance headphones stay silent.
++		 */
+ 		.pin = "Headphone Jack",
+-		.mask = SND_JACK_HEADPHONE,
++		.mask = SND_JACK_HEADPHONE | SND_JACK_LINEOUT,
+ 	},
+ };
+ 
+-- 
+2.43.0
+

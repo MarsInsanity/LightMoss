@@ -1,0 +1,5 @@
+#!/bin/sh
+# Back from suspend: route the output by the jack again (headphones may have
+# gone in or out while asleep, and a restored mixer state may hold the old
+# route). The system-sleep hook runs this when it is there.
+exec /usr/libexec/lightmoss/audio route

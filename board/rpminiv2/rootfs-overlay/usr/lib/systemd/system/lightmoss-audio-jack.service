@@ -1,0 +1,9 @@
+[Unit]
+Description=Retroid Pocket sound card: follow the headphone jack
+# Started by lightmoss-audio.service (Wants=), once it is done.
+After=lightmoss-audio.service
+
+[Service]
+ExecStart=/usr/libexec/lightmoss/audio follow
+Restart=always
+RestartSec=5
