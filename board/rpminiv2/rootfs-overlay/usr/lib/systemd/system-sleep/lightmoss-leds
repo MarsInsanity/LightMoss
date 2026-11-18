@@ -1,0 +1,19 @@
+#!/bin/sh
+# The stick lights go dark for the length of a suspend and come back as spruce
+# left them. ROCKNIX does the same on this hardware (sleep.d/pre/001-led: lit,
+# they kept the device from sleeping). The kernel also blanks them and puts the
+# controllers in shutdown (4-lightmoss/0050), so this is the second line.
+# Turned off only once their state is saved, so a failed save leaves them on
+# rather than dark for good.
+STATE=/run/lightmoss-leds
+LEDS=/usr/libexec/lightmoss/leds
+
+case "$1" in
+pre)
+	"$LEDS" save "$STATE" && "$LEDS" off
+	;;
+post)
+	"$LEDS" restore "$STATE"
+	;;
+esac
+exit 0
