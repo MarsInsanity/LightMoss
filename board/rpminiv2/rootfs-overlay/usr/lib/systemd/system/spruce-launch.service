@@ -32,8 +32,15 @@ ExecStartPre=-/usr/libexec/lightmoss/console-blank
 # runtime.sh is spruce's own entry point. SIGHUP is ignored before the exec and
 # stays ignored in everything spruce starts: TTYVHangup below hangs up tty1
 # when this unit stops, which would otherwise kill a running game before it
-# saves. With /boot/lightmoss-debug, spruce narrates on the screen.
-ExecStart=/bin/sh -c 'trap "" HUP; if [ -e /boot/lightmoss-debug ]; then exec /mnt/SDCARD/spruce/scripts/runtime.sh >/dev/tty1 2>&1; else exec /mnt/SDCARD/spruce/scripts/runtime.sh; fi'
+# saves. So are the terminal's other signals: tty1 is spruce's controlling
+# terminal, and Ctrl+C, Ctrl+\ or Ctrl+Z typed on a USB or Bluetooth keyboard
+# while no SDL program holds the keyboard would end or stop spruce for good
+# (death by SIGINT counts as a clean exit, so no restart). spruce never sends
+# these three itself, and programs that want Ctrl+C (RetroArch) install their
+# own handler.
+# The output goes to the journal; with /boot/lightmoss-debug,
+# lightmoss-debug-console.service also shows it on the screen.
+ExecStart=/bin/sh -c 'trap "" HUP INT QUIT TSTP; exec /mnt/SDCARD/spruce/scripts/runtime.sh'
 Restart=on-failure
 RestartSec=3
 StandardInput=tty
