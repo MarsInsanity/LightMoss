@@ -1,0 +1,85 @@
+From 2bf007345446e39f8e760f84aa647b602186b494 Mon Sep 17 00:00:00 2001
+From: LightMoss <noreply@github.com>
+Date: Wed, 18 Nov 2026 14:29:35 +0000
+Subject: [PATCH] input: retroid: optional swap of the north and west face
+ buttons
+
+Which face button the MCU's BTN_NORTH and BTN_WEST are is not settled:
+ROCKNIX's InputPlumber map for this driver takes BTN_NORTH for the left
+button and BTN_WEST for the top one, while its EmulationStation and SDL
+database entries for the same device, and Batocera's, take them the
+other way round. Every front end configuration on top depends on it.
+
+Add swap_xy (default off, writable at runtime) that reports the two the
+other way round, releasing a held button under its old code first, so
+the question can be settled on a unit and corrected in one place without
+rebuilding anything. Off, nothing changes.
+---
+ drivers/input/joystick/retroid.c | 34 +++++++++++++++++++++++++++++++-
+ 1 file changed, 33 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/input/joystick/retroid.c b/drivers/input/joystick/retroid.c
+index 1782478db..e5b8a59f3 100644
+--- a/drivers/input/joystick/retroid.c
++++ b/drivers/input/joystick/retroid.c
+@@ -79,6 +79,8 @@ struct gamepad_device {
+ 	/* BTN_TL2/BTN_TR2 as last reported (with hysteresis). */
+ 	bool l2_down;
+ 	bool r2_down;
++	/* swap_xy as last applied. */
++	bool xy_swapped;
+ };
+ 
+ static const u8 gamepad_frame_magic[4] = { 0xA5, 0xD3, 0x5A, 0x3D };
+@@ -130,6 +132,16 @@ module_param_cb(trigger_release_percent, &trigger_percent_ops,
+ 		&trigger_release_percent, 0644);
+ MODULE_PARM_DESC(trigger_release_percent, "Travel (%) below which BTN_TL2/BTN_TR2 release");
+ 
++/*
++ * The face buttons the MCU reports as BTN_NORTH and BTN_WEST, the other way
++ * round. ROCKNIX's InputPlumber map for this driver takes BTN_NORTH for the
++ * left button and BTN_WEST for the top one, its EmulationStation and SDL
++ * entries the opposite. Off: the codes are as they always were.
++ */
++static bool swap_xy;
++module_param(swap_xy, bool, 0644);
++MODULE_PARM_DESC(swap_xy, "Swap the codes of the north and west face buttons");
++
+ static int update_params=0;
+ 
+ static int trigger_left_max=0x610;
+@@ -339,10 +351,30 @@ static void gamepad_input_handler(struct gamepad_device *dev,
+ 	}
+ 
+ 
++	if (READ_ONCE(swap_xy) != dev->xy_swapped) {
++		/*
++		 * Release both under whichever code they went down with; the
++		 * loop below presses what is still held under the new ones.
++		 */
++		for (i = 0; i < ARRAY_SIZE(keymap); i++) {
++			if (keymap[i] != BTN_NORTH && keymap[i] != BTN_WEST)
++				continue;
++			input_report_key(indev, keymap[i], 0);
++			prev_states &= ~BIT(i);
++		}
++		dev->xy_swapped = !dev->xy_swapped;
++	}
++
+ 	bitmap_xor(&changes, &current_states, &prev_states, ARRAY_SIZE(keymap));
+ 
+ 	for_each_set_bit(i, &changes, ARRAY_SIZE(keymap)) {
+-		input_report_key(indev, keymap[i], (current_states & BIT(i)));
++		unsigned int code = keymap[i];
++
++		if (dev->xy_swapped && code == BTN_NORTH)
++			code = BTN_WEST;
++		else if (dev->xy_swapped && code == BTN_WEST)
++			code = BTN_NORTH;
++		input_report_key(indev, code, (current_states & BIT(i)));
+ 	}
+ 
+ 	int16_t value;
+-- 
+2.43.0
+

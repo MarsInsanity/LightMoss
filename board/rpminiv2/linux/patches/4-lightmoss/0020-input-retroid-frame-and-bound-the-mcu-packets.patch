@@ -1,0 +1,294 @@
+From a34e9b1711e7cd545becef3ae859e927c741a70e Mon Sep 17 00:00:00 2001
+From: LightMoss <noreply@github.com>
+Date: Wed, 18 Nov 2026 14:26:36 +0000
+Subject: [PATCH] input: retroid: frame and bound the MCU's packets
+
+The receive path took every chunk the UART delivered as exactly one
+packet. It checked only count >= 7 but read bytes 6-7 as a payload length
+(0-65535) and copied that many bytes into a 64-byte buffer on the stack,
+gated by nothing but a one-byte XOR checksum over the chunk. A chunk that
+starts mid-packet (a packet split across tty buffers, noise after resume)
+passes that check about one time in 256 with an arbitrary length: a stack
+overflow (stack protector panic) or an over-read. A zero length left the
+buffer uninitialised and command 0x02 then reported stack garbage as keys
+and sticks. Two packets in one chunk failed the checksum and were both
+dropped, losing a short tap.
+
+Keep a small reassembly buffer per device, resynchronise on the A5 D3 5A
+3D magic, take the payload length from the header (at most 64 bytes),
+check the frame's own checksum and hand on every complete frame; a
+partial frame waits for the next chunk. Command 0x02 is used only with
+its 14 bytes of payload.
+
+Should the MCU's length field ever not count its payload, every packet
+would fail to frame and the pad would go dead. The old whole-chunk check
+is therefore kept as a witness: after eight chunks in a row that pass it
+but do not frame, the driver warns and goes back to whole chunks, with
+the copy bounded by the chunk and the buffer.
+
+The client ops and driver data were set only after the port was opened;
+serdev calls ops->receive_buf without checking ops, so a byte from the
+MCU in that window oopsed. Set both first, and open the port after the
+input device is registered, which also closes it before the input device
+is freed on unbind.
+---
+ drivers/input/joystick/retroid.c | 187 +++++++++++++++++++++++++------
+ 1 file changed, 154 insertions(+), 33 deletions(-)
+
+diff --git a/drivers/input/joystick/retroid.c b/drivers/input/joystick/retroid.c
+index 7000a1cf9..d54963616 100644
+--- a/drivers/input/joystick/retroid.c
++++ b/drivers/input/joystick/retroid.c
+@@ -25,6 +25,15 @@
+ 
+ #define DRIVER_NAME "retroid-pocket-gamepad"
+ #define MAX_DATA_LEN 64
++/*
++ * A frame on the wire: A5 D3 5A 3D, frame number, command, payload length
++ * (LE16), the payload, then the XOR of everything after the magic.
++ */
++#define FRAME_HDR_LEN 8
++#define FRAME_LEN(len) (FRAME_HDR_LEN + (len) + 1)
++#define RX_BUF_LEN 256
++/* Whole-chunk packets the framer could not place before it trusts them. */
++#define RX_LEGACY_AFTER 8
+ #define INT_SIGN(X) ((X > 0) - (X < 0))
+ 
+ #define gamepad_serdev_write_seq(serdev, seq...)                      \
+@@ -62,8 +71,15 @@ struct gamepad_device {
+ 	struct gpio_desc *reset_gpio;
+ 	struct input_dev *dev_input;
+ 	struct platform_device *platform_dev;
++	/* Bytes from the UART not yet parsed: at most one partial frame. */
++	u8 rx_buf[RX_BUF_LEN];
++	size_t rx_len;
++	unsigned int rx_unframed;
++	bool rx_legacy;
+ };
+ 
++static const u8 gamepad_frame_magic[4] = { 0xA5, 0xD3, 0x5A, 0x3D };
++
+ static bool rumble_enable = true;
+ module_param(rumble_enable, bool, 0660);
+ 
+@@ -293,44 +309,143 @@ static void gamepad_data_handler(struct serdev_device *serdev,
+ 
+ 	switch (data->command) {
+ 	case 0x2:
+-		gamepad_input_handler(dev, data);
++		/* Keys, triggers and sticks: 14 bytes. */
++		if (data->data_len >= 14)
++			gamepad_input_handler(dev, data);
+ 		break;
+ 	default:
+ 		break;
+ 	}
+ }
+ 
++/* One checked frame: len payload bytes at frame + FRAME_HDR_LEN. */
++static void gamepad_rx_frame(struct serdev_device *serdev, const u8 *frame,
++			     size_t len)
++{
++	struct gamepad_data recv_data_buffer = { };
++
++	memcpy(recv_data_buffer.header, frame, 4);
++	recv_data_buffer.frame_number = frame[4];
++	recv_data_buffer.command = frame[5];
++	recv_data_buffer.data_len = len;
++	memcpy(recv_data_buffer.data, frame + FRAME_HDR_LEN, len);
++
++	gamepad_data_handler(serdev, &recv_data_buffer);
++}
++
++/*
++ * Hand on every complete frame in the buffer and drop what cannot start
++ * one, keeping a trailing partial frame for the next chunk. Returns the
++ * number of frames passed on.
++ */
++static unsigned int gamepad_rx_parse(struct serdev_device *serdev,
++				     struct gamepad_device *gd)
++{
++	u8 *b = gd->rx_buf;
++	size_t pos = 0, avail, len, frame_len;
++	unsigned int frames = 0;
++	const u8 *p;
++
++	while (pos < gd->rx_len) {
++		p = memchr(b + pos, gamepad_frame_magic[0], gd->rx_len - pos);
++		if (!p) {
++			pos = gd->rx_len;
++			break;
++		}
++		pos = p - b;
++		avail = gd->rx_len - pos;
++
++		if (memcmp(p, gamepad_frame_magic,
++			   min(avail, sizeof(gamepad_frame_magic)))) {
++			pos++;
++			continue;
++		}
++		if (avail < FRAME_HDR_LEN)
++			break;
++
++		len = p[6] | (p[7] << 8);
++		if (len > MAX_DATA_LEN) {
++			pos++;
++			continue;
++		}
++		frame_len = FRAME_LEN(len);
++		if (avail < frame_len)
++			break;
++		if (gamepad_data_checksum(p, frame_len) != p[frame_len - 1]) {
++			pos++;
++			continue;
++		}
++
++		gamepad_rx_frame(serdev, p, len);
++		frames++;
++		pos += frame_len;
++	}
++
++	if (pos) {
++		memmove(b, b + pos, gd->rx_len - pos);
++		gd->rx_len -= pos;
++	}
++
++	return frames;
++}
++
++/*
++ * The driver this comes from took every chunk the UART delivered as one
++ * packet and checked it as a whole. A chunk that passes that check is how
++ * the MCU's packets have always arrived; it can only fail to frame if its
++ * length field does not count its payload. Should that happen several
++ * times in a row, go back to whole chunks (bounded) rather than drop every
++ * packet and leave a dead pad.
++ */
++static bool gamepad_rx_chunk_ok(const u8 *data, size_t count)
++{
++	return count >= FRAME_LEN(0) &&
++	       !memcmp(data, gamepad_frame_magic, sizeof(gamepad_frame_magic)) &&
++	       gamepad_data_checksum(data, count) == data[count - 1];
++}
++
++static void gamepad_rx_chunk(struct serdev_device *serdev, const u8 *data,
++			     size_t count)
++{
++	size_t len = data[6] | (data[7] << 8);
++
++	len = min3(len, count - FRAME_HDR_LEN, (size_t)MAX_DATA_LEN);
++	gamepad_rx_frame(serdev, data, len);
++}
++
+ static size_t gamepad_mcu_uart_rx_bytes(struct serdev_device *serdev,
+ 					const u8 *data, size_t count)
+ {
+-	struct device *dev = &serdev->dev;
+-	struct gamepad_data recv_data_buffer;
+-	u8 checksum;
++	struct gamepad_device *gd = serdev_device_get_drvdata(serdev);
++	unsigned int frames = 0;
++	size_t taken = 0, n;
+ 
+-	if (!data || count < 7) {
+-		dev_warn_ratelimited(dev, "invalid packet");
++	if (!gd || !data || !count)
+ 		return count;
+-	}
+ 
+-	checksum = gamepad_data_checksum(data, count);
+-	if (checksum != *(data + count - 1)) {
+-		//dev_warn_ratelimited(dev, "packet checksum failed");
++	if (gd->rx_legacy) {
++		if (gamepad_rx_chunk_ok(data, count))
++			gamepad_rx_chunk(serdev, data, count);
+ 		return count;
+ 	}
+ 
+-	memcpy(recv_data_buffer.header, data, 4);
+-	recv_data_buffer.frame_number = *(data + 4);
+-	recv_data_buffer.command = *(data + 5);
+-	recv_data_buffer.data_len = *(data + 6) | (*(data + 7) << 8);
+-
+-	if (recv_data_buffer.data_len) {
+-		memset(&recv_data_buffer.data[0], 0,
+-		       sizeof(recv_data_buffer.data));
+-		memcpy(&recv_data_buffer.data[0], data + 8,
+-		       recv_data_buffer.data_len);
++	while (taken < count) {
++		n = min(count - taken, sizeof(gd->rx_buf) - gd->rx_len);
++		memcpy(gd->rx_buf + gd->rx_len, data + taken, n);
++		gd->rx_len += n;
++		taken += n;
++		frames += gamepad_rx_parse(serdev, gd);
+ 	}
+ 
+-	gamepad_data_handler(serdev, &recv_data_buffer);
++	if (frames) {
++		gd->rx_unframed = 0;
++	} else if (gamepad_rx_chunk_ok(data, count) &&
++		   ++gd->rx_unframed >= RX_LEGACY_AFTER) {
++		dev_warn(gd->dev,
++			 "MCU packets do not frame by their length field, taking whole chunks\n");
++		gd->rx_legacy = true;
++		gd->rx_len = 0;
++	}
+ 
+ 	return count;
+ }
+@@ -423,18 +538,16 @@ static int gamepad_mcu_uart_probe(struct serdev_device *serdev)
+ 
+ 	msleep(100);
+ 
+-	ret = devm_serdev_device_open(dev, serdev);
+-	if (ret)
+-		return dev_err_probe(dev, ret, "Unable to open UART device\n");
++	/*
++	 * Everything the receive path uses is in place before the port opens:
++	 * serdev calls ops->receive_buf without checking ops, and bytes from
++	 * the MCU can arrive the moment it is open. The port is opened after
++	 * the input device is registered, so it is also closed (devres runs
++	 * backwards) before the input device goes away.
++	 */
+ 	gamepad_dev->dev = dev;
+-
+ 	serdev_device_set_drvdata(serdev, gamepad_dev);
+-
+-	ret = serdev_device_set_baudrate(serdev, 115200);
+-	if (ret < 0)
+-		return dev_err_probe(dev, ret, "Failed to set up host baud rate\n");
+-
+-	serdev_device_set_flow_control(serdev, false);
++	serdev_device_set_client_ops(serdev, &gamepad_mcu_uart_client_ops);
+ 
+ 	gamepad_dev->dev_input = devm_input_allocate_device(dev);
+ 	if (!gamepad_dev->dev_input)
+@@ -502,6 +615,16 @@ static int gamepad_mcu_uart_probe(struct serdev_device *serdev)
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "Could not register input device\n");
+ 
++	ret = devm_serdev_device_open(dev, serdev);
++	if (ret)
++		return dev_err_probe(dev, ret, "Unable to open UART device\n");
++
++	ret = serdev_device_set_baudrate(serdev, 115200);
++	if (ret < 0)
++		return dev_err_probe(dev, ret, "Failed to set up host baud rate\n");
++
++	serdev_device_set_flow_control(serdev, false);
++
+ 	gamepad_dev->platform_dev = platform_device_register_simple(DRIVER_NAME, -1, NULL, 0);
+ 	if (IS_ERR(gamepad_dev->platform_dev)) {
+ 		ret = PTR_ERR(gamepad_dev->platform_dev);
+@@ -512,8 +635,6 @@ static int gamepad_mcu_uart_probe(struct serdev_device *serdev)
+ 			dev_warn(dev, "Failed to create rumble_enable sysfs on platform device: %d\n", ret);
+ 	}
+ 
+-	serdev_device_set_client_ops(serdev, &gamepad_mcu_uart_client_ops);
+-
+ 	gamepad_send_init_sequence(serdev);
+ 
+ 	return 0;
+-- 
+2.43.0
+
