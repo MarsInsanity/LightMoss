@@ -6,7 +6,7 @@
 # ROCKNIX's UCM configuration (alsa-ucm-conf, HiFi verb) switches the codecs
 # on and routes frontend MultiMedia1 (hw:0,0) to the headphones and
 # MultiMedia2 (hw:0,1) to the speakers. spruce plays to hw:0,0 only (its
-# softvol "Master" over dmix, as on every dArkMoss-style base), so
+# softvol "Master"; on this board without dArkMoss's dmix), so
 # MultiMedia1 goes to the speakers too while no headphones are in: one PCM,
 # whichever output is in use.
 #
@@ -38,12 +38,13 @@ alsaucm -c "hw:$card" set _boot "" set _verb HiFi set _enadev Speaker set _enade
 
 # ROCKNIX's UCM boots the speakers' digital gain at "120" on a -84..+40 dB
 # control, +36 dB, for PipeWire's software volume to bring down. Here only
-# spruce's softvol "Master" is in front of it, and ALSA creates that at full
-# level: the first sounds came out painfully loud. 0 dB, as the headphone path
-# (RX_RX0/RX1 Digital Volume) already is; the amplifiers' PA Volume stays.
-for c in "WSA_RX0 Digital" "WSA_RX1 Digital"; do
-	amixer -q -c "$card" sset "$c" 0dB 2>/dev/null ||
-		echo "lightmoss-audio: could not set $c to 0 dB" >&2
+# spruce's softvol "Master" is in front of it: full-scale menu sounds clipped,
+# painfully loud. 84 is 0 dB, as the headphone path (RX_RX0/RX1 Digital
+# Volume) already is; the amplifiers' PA Volume stays. Set by the control's
+# value, as spruce's check does on the device (its log: "was 36 dB, set to
+# 0 dB"); the simple-mixer "sset ... 0dB" this used was never seen to take.
+for c in "WSA_RX0 Digital Volume" "WSA_RX1 Digital Volume"; do
+	cset "$c" 84 || echo "lightmoss-audio: could not set $c to 0 dB" >&2
 done
 
 jack() {
