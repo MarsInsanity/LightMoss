@@ -81,10 +81,11 @@ BR2_PACKAGE_WIRELESS_REGDB=y
 # through libglvnd: libOpenGL.so.0 (no libGL.so.1, which is GLX and needs
 # X11), with libEGL.so.1, libGLESv1_CM.so.1 and libGLESv2.so.2 from glvnd
 # and Mesa as their vendor (libEGL_mesa.so.0, by
-# /usr/share/glvnd/egl_vendor.d/50_mesa.json). glvnd's libraries export
-# the same symbols as Mesa's own did. SDL loads libOpenGL.so.0 for a program
-# that asks for a desktop GL context; one that does not still gets OpenGL
-# ES, as before.
+# /usr/share/glvnd/egl_vendor.d/50_mesa.json). glvnd's GLES libraries
+# export the same symbols as Mesa's own did, its libEGL all but Mesa's three
+# MesaGLInteropEGL* (OpenCL interop). SDL loads libOpenGL.so.0 for a program
+# that asks for a desktop GL context (it used to fall back to OpenGL ES 2.0);
+# one that does not still gets OpenGL ES, as before.
 BR2_PACKAGE_MESA3D=y
 BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_FREEDRENO=y
 BR2_PACKAGE_MESA3D_GBM=y
