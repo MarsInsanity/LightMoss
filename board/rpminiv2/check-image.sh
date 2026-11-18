@@ -5,6 +5,8 @@
 #   - the system in LMSYS: os-release names this board (and VERSION, if
 #     given), the update scripts are there, the system's own boot-entry gives
 #     entries whose kernel, initrd and device tree are among its boot files;
+#   - the GPU stack is there, 64- and 32-bit (glvnd, Mesa, the Vulkan loader,
+#     Turnip's two ICD manifests naming libraries in the image);
 #   - the system's filesystem has room left (it is a fixed size).
 #
 #   sudo board/rpminiv2/check-image.sh lightmoss-rpminiv2-<version>.img.xz [VERSION]
@@ -89,6 +91,34 @@ for slot in 1 2 sd; do
 	done
 done
 [ "$fails" = 0 ] && ok "boot entries name the system's boot files: $(ls "$m/usr/share/lightmoss/boot" | tr '\n' ' ')"
+
+# The GPU stack, 64- and 32-bit: glvnd's dispatch libraries with Mesa as the
+# EGL vendor, desktop OpenGL, the Vulkan loader, and Turnip's ICD manifests
+# naming a library that is in the image, one per word size.
+for f in usr/lib/libEGL.so.1 usr/lib/libGLESv2.so.2 usr/lib/libOpenGL.so.0 \
+	usr/lib/libEGL_mesa.so.0 usr/lib/libgbm.so.1 usr/lib/libvulkan.so.1 \
+	usr/lib/libvulkan_freedreno.so usr/share/glvnd/egl_vendor.d/50_mesa.json \
+	usr/lib/arm-linux-gnueabihf/libEGL.so.1 usr/lib/arm-linux-gnueabihf/libGLESv2.so.2 \
+	usr/lib/arm-linux-gnueabihf/libGLdispatch.so.0 usr/lib/arm-linux-gnueabihf/libEGL_mesa.so.0 \
+	usr/lib/arm-linux-gnueabihf/libvulkan.so.1 usr/lib/arm-linux-gnueabihf/libvulkan_freedreno.so; do
+	[ -e "$m/$f" ] || bad "GPU: no $f"
+done
+icds=0
+for j in "$m"/usr/share/vulkan/icd.d/freedreno_icd.*.json; do
+	[ -f "$j" ] || continue
+	lp="$(sed -n 's/.*"library_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$j" | head -n 1)"
+	la="$(sed -n 's/.*"library_arch"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$j" | head -n 1)"
+	case "$lp" in
+		/usr/lib/arm-linux-gnueabihf/*) wa=32 ;;
+		/usr/lib/*) wa=64 ;;
+		*) bad "GPU: ${j##*/}: library_path '$lp' is not under /usr/lib"; continue ;;
+	esac
+	[ -e "$m$lp" ] || { bad "GPU: ${j##*/}: $lp is not in the image"; continue; }
+	[ -z "$la" ] || [ "$la" = "$wa" ] || { bad "GPU: ${j##*/}: library_arch $la for a $wa-bit $lp"; continue; }
+	icds=$((icds + 1))
+done
+[ "$icds" = 2 ] && ok "GPU: glvnd, Mesa, Vulkan loader and Turnip (64- and 32-bit)" ||
+	bad "GPU: $icds usable Turnip ICD manifests, not 2 (64- and 32-bit)"
 
 # Room: the system copy is a fixed-size filesystem (grown to its partition on
 # the internal storage, not on a card).
