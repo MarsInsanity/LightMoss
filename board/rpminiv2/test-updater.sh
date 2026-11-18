@@ -215,6 +215,8 @@ echo kept > "$T/var/lib/newstate/x"
 echo /etc/custom.conf > "$T/etc/lightmoss/update-keep"
 echo mine > "$T/etc/custom.conf"
 sed -i 's/^root:[^:]*:/root:$6$device$changed:/' "$T/etc/shadow"
+# (no spruce line here: the image's must stay as it is)
+sed -i '/^spruce:/d' "$T/etc/shadow"
 mkfs.ext4 -q -F -L LIGHTMOSS -d "$T" "$LMSYS1"
 mkfs.ext4 -q -F -L LIGHTMOSS "$LMSYS2"
 PU1="$(blkid -p -o value -s PART_ENTRY_UUID "$LMSYS1")"
