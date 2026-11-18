@@ -6,8 +6,10 @@
 
 # The release that goes with buildroot's alsa-lib (1.2.14): newer
 # configurations may use UCM syntax that alsa-lib does not know yet.
-# ROCKNIX's Retroid Pocket patches (its 0002 and 0003 for SM8250) apply to it
-# unchanged; its 0004 (DisplayPort audio) does not, and is not needed.
+# ROCKNIX's Retroid Pocket patches for SM8250 apply to it unchanged (its 0002,
+# 0003 and 0004 are 0001-0003 here). 0003 adds an "HDMI" verb for DisplayPort
+# audio on MultiMedia4 (hw:<card>,3); lightmoss-audio does not use it yet: it
+# sets up the HiFi verb, and spruce plays to MultiMedia1 only.
 ALSA_UCM_CONF_VERSION = 1.2.14
 ALSA_UCM_CONF_SOURCE = alsa-ucm-conf-$(ALSA_UCM_CONF_VERSION).tar.bz2
 ALSA_UCM_CONF_SITE = https://www.alsa-project.org/files/pub/lib
