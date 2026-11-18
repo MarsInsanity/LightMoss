@@ -7,4 +7,5 @@ config BR2_PACKAGE_LIGHTMOSS_FIRMWARE_SM8250
 	  (projects/ROCKNIX/devices/SM8250/config/kernel-firmware.dat):
 	  Adreno 650 (GMU, SQE, zap shader), the audio, compute and
 	  sensor DSPs, the video decoder, QCA6390 Wi-Fi (ath11k) and
-	  Bluetooth. From linux-firmware, in /usr/lib/firmware.
+	  Bluetooth; and Realtek USB Ethernet adapters (r8152). From
+	  linux-firmware, in /usr/lib/firmware.

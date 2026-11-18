@@ -1,0 +1,3 @@
+# A Wi-Fi device (wiphy) is there: apply the Wi-Fi country the user chose
+# (usr/libexec/lightmoss/wifi-country), if any.
+ACTION=="add", SUBSYSTEM=="ieee80211", TAG+="systemd", ENV{SYSTEMD_WANTS}+="lightmoss-wifi-country.service"
