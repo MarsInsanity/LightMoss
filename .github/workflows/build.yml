@@ -110,15 +110,13 @@ jobs:
         id: dl-cache
         uses: actions/cache/restore@v4
         with:
-          # The tarballs only: buildroot's git caches (the kernel's alone is
-          # ~7 GB of history) are rebuilt from scratch when needed.
-          path: |
-            dl
-            !dl/*/git
+          # Each board its own (no fallback to the other board's: two ~9 GB
+          # entries evicted each other), and tarballs only: see "Drop git
+          # caches" below.
+          path: dl
           key: dl-${{ matrix.board }}-${{ hashFiles(format('configs/lightmoss_{0}_*defconfig', matrix.board), 'Makefile', 'package/**/*.mk') }}
           restore-keys: |
             dl-${{ matrix.board }}-
-            dl-
 
       - name: Restore ccache
         uses: actions/cache/restore@v4
@@ -149,13 +147,28 @@ jobs:
         if: failure()
         run: tail -n 300 build.log
 
+      # What an update installs, read as lightmoss-update and the LightMoss
+      # Update app will read it: a release must not publish an image they
+      # cannot install.
+      - name: Check the image
+        if: matrix.board == 'rpminiv2'
+        run: |
+          img="$(ls "$OUT"/images/lightmoss-rpminiv2-*.img.xz | head -n 1)"
+          sudo sh board/rpminiv2/check-image.sh "$img" "$LIGHTMOSS_VERSION"
+
+      # Tarballs only: buildroot's git caches (the R36S kernel's alone is ~7 GB
+      # of history) are not kept; the <package>-<version>-git4.tar.gz made from
+      # them is, and buildroot uses it instead of cloning again. ("!dl/*/git"
+      # in path did not exclude them: actions/cache archives "dl" whole.)
+      - name: Drop git caches
+        if: always() && steps.dl-cache.outputs.cache-hit != 'true'
+        run: rm -rf dl/*/git
+
       - name: Save downloads
         if: always() && steps.dl-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: |
-            dl
-            !dl/*/git
+          path: dl
           key: dl-${{ matrix.board }}-${{ hashFiles(format('configs/lightmoss_{0}_*defconfig', matrix.board), 'Makefile', 'package/**/*.mk') }}
 
       - name: Save ccache
@@ -194,6 +207,13 @@ jobs:
           V: ${{ needs.version.outputs.version }}
         run: |
           ls -l images
+          # Every board's image and its checksum, as each board's LightMoss
+          # Update app looks for them (lightmoss-<board>-*.img.xz + .sha256).
+          for b in r36s rpminiv2; do
+            ls images/lightmoss-$b-*.img.xz images/lightmoss-$b-*.img.xz.sha256 > /dev/null ||
+              { echo "no $b image: not releasing"; exit 1; }
+          done
+          ( cd images && sha256sum -c lightmoss-*.img.xz.sha256 )
           # Creates the tag on this commit when it does not exist yet.
           gh release create "$V" --target "$GITHUB_SHA" --title "LightMoss $V" --generate-notes \
             images/lightmoss-*.img.xz images/lightmoss-*.img.xz.sha256
