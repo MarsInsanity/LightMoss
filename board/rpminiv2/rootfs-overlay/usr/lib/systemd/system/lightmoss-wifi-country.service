@@ -1,0 +1,10 @@
+[Unit]
+Description=Wi-Fi country from LMBOOT's lightmoss-wifi-country
+# Started by the Wi-Fi device (62-lightmoss-wifi-country.rules), once
+# LMBOOT is mounted; nothing to enable.
+After=lightmoss-boot.service
+ConditionPathExists=/boot/lightmoss-wifi-country
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/lightmoss/wifi-country
