@@ -1,0 +1,51 @@
+From 5b0892444081623e3d936265064e6e17f9635f9c Mon Sep 17 00:00:00 2001
+From: LightMoss <noreply@github.com>
+Date: Wed, 18 Nov 2026 14:58:12 +0000
+Subject: [PATCH] Input: qcom-spmi-haptics: scale rumble over the whole VMAX
+ range
+
+spmi_haptics_play_effect() turned the 16-bit rumble magnitude into 0-255
+(strong >> 8, else weak >> 10) and then divided by 100 to pick the drive
+voltage, so every strong magnitude from 0x6400 up, 39 % of the range, played
+at the full 3596 mV and a weak-only effect never got past 63 %. Games rumbled
+at full strength almost always and spruce's Weak/Medium/Strong setting
+changed only the duration.
+
+Take the strong magnitude over the whole 16-bit range and the weak one at
+half weight, whichever asks for more, and spread it linearly over the VMAX
+range (116-3596 mV, 31 steps).
+---
+ drivers/input/misc/qcom-spmi-haptics.c | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/input/misc/qcom-spmi-haptics.c b/drivers/input/misc/qcom-spmi-haptics.c
+index 96e6e8c73..ebe407939 100644
+--- a/drivers/input/misc/qcom-spmi-haptics.c
++++ b/drivers/input/misc/qcom-spmi-haptics.c
+@@ -753,9 +753,14 @@ static int spmi_haptics_play_effect(struct input_dev *dev, void *data,
+ 	dev_dbg(haptics->dev, "%s: Rumbling with strong: %d and weak: %d", __func__,
+ 		effect->u.rumble.strong_magnitude, effect->u.rumble.weak_magnitude);
+ 
+-	haptics->magnitude = effect->u.rumble.strong_magnitude >> 8;
+-	if (!haptics->magnitude)
+-		haptics->magnitude = effect->u.rumble.weak_magnitude >> 10;
++	/*
++	 * One actuator plays both rumble motors: the strong one over the
++	 * whole 16-bit range, the weak one at half weight, whichever asks for
++	 * more. Spread that over the whole VMAX range; a divisor of 100 on a
++	 * 0-255 magnitude used to reach full voltage at strong 0x6400.
++	 */
++	haptics->magnitude = max_t(u32, effect->u.rumble.strong_magnitude,
++				   effect->u.rumble.weak_magnitude / 2);
+ 
+ 	if (!haptics->magnitude) {
+ 		atomic_set(&haptics->active, 0);
+@@ -764,7 +769,7 @@ static int spmi_haptics_play_effect(struct input_dev *dev, void *data,
+ 
+ 	atomic_set(&haptics->active, 1);
+ 
+-	haptics->vmax = ((HAP_VMAX_MAX_MV - HAP_VMAX_MIN_MV) * haptics->magnitude) / 100 +
++	haptics->vmax = ((HAP_VMAX_MAX_MV - HAP_VMAX_MIN_MV) * haptics->magnitude) / 0xffff +
+ 					HAP_VMAX_MIN_MV;
+ 
+ 	dev_dbg(haptics->dev, "%s: magnitude: %d, vmax: %d", __func__,
