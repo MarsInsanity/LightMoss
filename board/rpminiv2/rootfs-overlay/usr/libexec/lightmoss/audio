@@ -36,6 +36,16 @@ cset() { amixer -q -c "$card" cset "name=$1" "$2" 2>/dev/null; }
 alsaucm -c "hw:$card" set _boot "" set _verb HiFi set _enadev Speaker set _enadev Headphones ||
 	echo "lightmoss-audio: alsaucm could not set up the card" >&2
 
+# ROCKNIX's UCM boots the speakers' digital gain at "120" on a -84..+40 dB
+# control, +36 dB, for PipeWire's software volume to bring down. Here only
+# spruce's softvol "Master" is in front of it, and ALSA creates that at full
+# level: the first sounds came out painfully loud. 0 dB, as the headphone path
+# (RX_RX0/RX1 Digital Volume) already is; the amplifiers' PA Volume stays.
+for c in "WSA_RX0 Digital" "WSA_RX1 Digital"; do
+	amixer -q -c "$card" sset "$c" 0dB 2>/dev/null ||
+		echo "lightmoss-audio: could not set $c to 0 dB" >&2
+done
+
 jack() {
 	v="$(amixer -c "$card" cget "name=Headphone Jack" 2>/dev/null | sed -n 's/.*: values=\(.*\)/\1/p')"
 	case "$v" in on) j=1 ;; *) j=0 ;; esac
