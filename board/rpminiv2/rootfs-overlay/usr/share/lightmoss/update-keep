@@ -1,0 +1,27 @@
+# What lightmoss-update carries from the running system copy into the one it
+# writes, one path per line (a file or a folder, under /etc, /var/lib or
+# /root). An update reads this list from the running system and from the
+# image it installs, so a release can add to it; add your own in
+# /etc/lightmoss/update-keep (kept too). root's and spruce's password, when
+# changed, is always kept.
+
+# Identity: the journal's machine ID, the SSH host keys and the keys allowed
+# to log in.
+/etc/machine-id
+/etc/dropbear
+/root/.ssh
+
+# Wi-Fi networks joined from spruce or with nmcli, and NetworkManager's state
+# (Wi-Fi on or off, its secret key for stable addresses).
+/etc/NetworkManager/system-connections
+/var/lib/NetworkManager
+
+# Bluetooth pairings (controllers, headphones).
+/var/lib/bluetooth
+
+# The time the clock was last set from the network (only when it was, this
+# start): the next start's clock begins there.
+/var/lib/systemd/timesync/clock
+
+# Your own additions to this list.
+/etc/lightmoss

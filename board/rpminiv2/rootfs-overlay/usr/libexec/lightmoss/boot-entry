@@ -7,10 +7,27 @@
 # on LMBOOT: the kernel (started through its EFI stub), the device tree, and
 # an initramfs that only carries firmware (no /init: the kernel mounts root=
 # itself, after the remote processors found their firmware in it).
+#
+# lightmoss-update runs the boot-entry of the image it installs, not this
+# one, so a release's own kernel options come with it.
+#
+# The kernel options:
+#   ro fsck.repair=yes  root is mounted read-only, so systemd-fsck-root checks
+#                       it (and repairs it, with no one to answer questions)
+#                       before systemd-remount-fs remounts it read-write as
+#                       /etc/fstab says.
+#   panic=10            a kernel panic restarts the device after 10 s instead
+#                       of hanging: OpenABL then counts down the try of an
+#                       updated copy and goes back to the old one by itself.
+#   rootwait=30         the internal storage shows up in under a second; a
+#                       copy whose root never appears panics (and so restarts)
+#                       after 30 s. A card can be slow: it waits as long as it
+#                       takes.
+#   net.ifnames=0       the Wi-Fi is wlan0 (spruce's name for it), not wlp1s0.
 slot="$1"; partuuid="$2"; version="${3:-unknown}"
 case "$slot" in
-	1|2) title="LightMoss $version (system $slot)" ;;
-	*)   title="LightMoss $version (card)" ;;
+	1|2) title="LightMoss $version (system $slot)"; wait=rootwait=30 ;;
+	*)   title="LightMoss $version (card)"; wait=rootwait ;;
 esac
 cat <<EOF
 title      $title
@@ -18,5 +35,5 @@ version    $version
 linux      /lightmoss-$slot/Image
 initrd     /lightmoss-$slot/firmware.cpio.gz
 devicetree /lightmoss-$slot/sm8250-retroidpocket-rpminiv2.dtb
-options    root=PARTUUID=$partuuid rootfstype=ext4 rootwait rw quiet console=tty0 video=efifb:off gpt lightmoss.slot=$slot
+options    root=PARTUUID=$partuuid rootfstype=ext4 $wait ro fsck.repair=yes panic=10 net.ifnames=0 quiet console=tty0 video=efifb:off gpt lightmoss.slot=$slot
 EOF

@@ -1,9 +1,21 @@
 #!/bin/sh
-# Once spruce has started: this system copy works, so keep its boot entry.
+# Keep this system copy's boot entry once spruce is up on it (internal
+# storage only: lightmoss-bless.service runs it for lightmoss.slot=1 and 2).
 #
 # OpenABL counts down the tries of an entry named lightmoss-N+<left>-<done>.conf
 # (Boot Loader Specification boot counting, as systemd-boot does); renaming it
 # lightmoss-N.conf marks it good for good.
+#
+# A start from such an entry is a trial (the first starts after an update).
+# The entry is kept once spruce is up: its boot jobs have started (PyUI's
+# first frame, or runtime.sh's own fallback 20 s later: the
+# /tmp/spruce_boot_jobs_started folder) and spruce-launch.service is active
+# with the runtime.sh it started first (or one that has run for 30 s). If
+# spruce keeps failing instead, or is not up after 10 minutes, the device
+# restarts: OpenABL counts the next try and, after
+# the third, goes back to the other copy. That way a copy that starts but
+# never gets to spruce falls back without anyone holding the power key. The
+# multi-user target does not wait for any of this.
 #
 # If loader.conf's default is the other copy's entry and that entry has no
 # tries left, the copy an update wrote never started and OpenABL fell back to
@@ -13,29 +25,99 @@
 # menu: nothing changes.
 . /usr/libexec/lightmoss/lib.sh
 
+UNIT=spruce-launch.service
+MARK="${LM_BLESS_MARK:-/tmp/spruce_boot_jobs_started}"
+AFTER_FIRST_FRAME=/mnt/SDCARD/spruce/scripts/boot/after_first_frame.sh
+WAIT="${LM_BLESS_WAIT:-600}"   # seconds spruce has to come up on a trial
+STEP="${LM_BLESS_STEP:-2}"
+STABLE="${LM_BLESS_STABLE:-30}" # seconds a restarted runtime.sh must run
+
+log() { echo "lightmoss-bless: $*"; }
+
 slot="$(lm_slot)"
 case "$slot" in 1|2) ;; *) exit 0 ;; esac
 mountpoint -q /boot || exit 0
 E=/boot/loader/entries
 changed=0
 
+# loader.conf's default, as lightmoss-update writes it (other lines stay).
+set_default() {
+	_conf=/boot/loader/loader.conf
+	{
+		echo "default lightmoss-$1.conf"
+		if [ -f "$_conf" ]; then sed '/^[[:space:]]*default[[:space:]]/d' "$_conf"; else echo "timeout 0"; fi
+	} > "$_conf.new"
+	sync
+	mv -f "$_conf.new" "$_conf"
+}
+
+unit() { systemctl show -P "$1" "$UNIT" 2>/dev/null; }
+
+trial=""
 for f in "$E"/lightmoss-"$slot"+*.conf; do
-	[ -e "$f" ] || continue
-	mv -f "$f" "$E/lightmoss-$slot.conf" && changed=1
-	echo "lightmoss-bless: system copy $slot kept (${f##*/})"
+	[ -e "$f" ] && trial="$f"
 done
 
-default="$(sed -n 's/^default[[:space:]]*//p' /boot/loader/loader.conf 2>/dev/null)"
+if [ -n "$trial" ]; then
+	log "system copy $slot is on trial (${trial##*/}): waiting for spruce"
+	n=0; same=0; lastpid=""
+	while :; do
+		state="$(unit ActiveState)"
+		restarts="$(unit NRestarts)"; restarts="${restarts:-0}"
+		pid="$(unit MainPID)"
+		if [ "$pid" = "$lastpid" ]; then same=$((same + 1)); else same=0; lastpid="$pid"; fi
+		# Up: its boot jobs started and runtime.sh runs, the first one
+		# spruce-launch started, or one that has kept running for 30 s. (A
+		# spruce without boot jobs: runtime.sh running for a minute.)
+		if [ "$state" = active ] &&
+		   { [ -d "$MARK" ] || { [ ! -e "$AFTER_FIRST_FRAME" ] && [ $(( same * STEP )) -ge 60 ]; }; } &&
+		   { [ "$restarts" = 0 ] || [ $(( same * STEP )) -ge "$STABLE" ]; }; then
+			break
+		fi
+		why=""
+		if [ "$restarts" -ge 5 ] 2>/dev/null || [ "$state" = failed ]; then
+			why="spruce keeps failing ($UNIT ${state:-unknown}, $restarts restarts)"
+		elif [ $(( n * STEP )) -ge "$WAIT" ]; then
+			why="spruce is not up after $WAIT s ($UNIT ${state:-unknown}, $restarts restarts)"
+		fi
+		if [ -n "$why" ]; then
+			# Kept by hand (or by an update) meanwhile: nothing to do.
+			[ -e "$trial" ] || exit 0
+			# Restart only when OpenABL counts this entry's starts (it
+			# renamed +3 to +2-1 ...) and this is one of its three tries:
+			# otherwise (an entry it never counted, or one past its last
+			# try, started because nothing else could be) a restart would
+			# only come back here, for ever.
+			done="${trial##*+}"; done="${done%.conf}"
+			case "$done" in *-*) done="${done#*-}" ;; *) done=0 ;; esac
+			if [ "$done" -ge 1 ] 2>/dev/null && [ "$done" -le 3 ]; then
+				log "$why: not keeping system copy $slot; restarting so that OpenABL counts the next try"
+				sync
+				systemctl --no-block reboot
+			else
+				log "$why: not keeping system copy $slot (not restarting: ${trial##*/} is not a counted try)"
+			fi
+			exit 1
+		fi
+		sleep "$STEP"
+		n=$((n + 1))
+	done
+	if [ -e "$trial" ]; then
+		mv -f "$trial" "$E/lightmoss-$slot.conf" && changed=1
+		log "spruce is up: system copy $slot kept (${trial##*/})"
+	fi
+fi
+
+default="$(sed -n 's/^default[[:space:]]*//p' /boot/loader/loader.conf 2>/dev/null | tail -n 1)"
 if [ -n "$default" ] && [ "$default" != "lightmoss-$slot.conf" ]; then
 	other="${default%.conf}"
 	for f in "$E/$other"+0-*.conf; do
 		[ -e "$f" ] || continue
-		echo "lightmoss-bless: ${f##*/} ran out of tries, back to system copy $slot"
+		log "${f##*/} ran out of tries, back to system copy $slot"
 		pending="$(cat /boot/lightmoss-update-pending 2>/dev/null)"
 		echo "LightMoss ${pending:-update} did not start; system copy $slot ($(sed -n 's/^LIGHTMOSS_VERSION="\(.*\)"/\1/p' /etc/os-release)) kept." > /boot/lightmoss-update-failed
 		rm -f "$f"
-		printf 'default lightmoss-%s.conf\ntimeout 0\n' "$slot" > /boot/loader/loader.conf.new
-		mv -f /boot/loader/loader.conf.new /boot/loader/loader.conf
+		set_default "$slot"
 		rm -f /boot/lightmoss-update-pending
 		changed=1
 	done

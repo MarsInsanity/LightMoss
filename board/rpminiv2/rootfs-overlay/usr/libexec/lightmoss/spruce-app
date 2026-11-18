@@ -2,8 +2,10 @@
 # Before spruce starts: put the LightMoss Update app on the spruce card
 # (App/LightMossUpdate), or bring it up to date. LightMoss ships it, so the
 # card always has the one that knows how this LightMoss updates. Files are
-# only written when they differ. Also removes the image a finished update
-# left at the root of the card (LightMoss.rkimg.done, 50 MB or so).
+# only written when they differ. Also removes the update image an interrupted
+# update left at the root of the card (LightMoss-update.img.xz, 100 MB or so;
+# an unfinished download, LightMoss-<version>.img.xz.part, stays for the app to
+# resume).
 SRC=/usr/share/lightmoss/spruce-app/LightMossUpdate
 APPS=/mnt/SDCARD/App
 DST="$APPS/LightMossUpdate"
@@ -19,10 +21,12 @@ for f in "$SRC"/*; do
 	cp -f "$f" "$DST/$n" && changed=1
 done
 
-if [ -f /mnt/SDCARD/LightMoss.rkimg.done ]; then
-	rm -f /mnt/SDCARD/LightMoss.rkimg.done
+# (LightMoss.rkimg.done: the R36S's, on a card that came from one.)
+for f in /mnt/SDCARD/LightMoss-update.img.xz /mnt/SDCARD/LightMoss.rkimg.done; do
+	[ -f "$f" ] || continue
+	rm -f "$f"
 	changed=1
-fi
+done
 
 [ "$changed" = 1 ] && sync
 exit 0

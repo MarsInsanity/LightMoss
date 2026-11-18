@@ -102,20 +102,41 @@ card).
 
 ## Updates: two system copies
 
-The LightMoss Update app downloads the release image to the spruce card and
-runs `lightmoss-update`, which writes the image's system to the copy that is
-**not** running, copies the machine ID and SSH host keys into it, puts its
-boot files on `LMBOOT` and makes it the default entry with three tries
-(`lightmoss-N+3.conf`, Boot Loader Specification boot counting, which OpenABL
-does like systemd-boot). The device restarts into it.
+The LightMoss Update app looks through the repository's releases for the
+newest one with an image for this board (`lightmoss-rpminiv2-<version>.img.xz`
+and its `.sha256`), sets the clock first if it is off (spruce's time sync),
+downloads the image to the spruce card, checks it and runs `lightmoss-update`.
+That writes the image's system to the copy that is **not** running: it first
+takes that copy out of OpenABL's entries (and keeps the running copy's), then
+writes and reads back the system, checks that the image is for this board,
+carries over what `/usr/share/lightmoss/update-keep` lists (machine ID, SSH
+host and authorized keys, Wi-Fi networks, Bluetooth pairings, the synced
+clock, your own `/etc/lightmoss/update-keep`; also a changed root/spruce
+password), puts the boot files on `LMBOOT`, writes the entry with the
+**image's own** `boot-entry` (so a release's kernel options come with it) as
+`lightmoss-N+3.conf` (three tries, Boot Loader Specification boot counting,
+which OpenABL does like systemd-boot) and only then makes it the default. The
+device restarts into it.
 
-Once spruce has started, `lightmoss-bless` renames the entry
-`lightmoss-N.conf` (kept). If the new copy never gets that far, OpenABL has
-counted its tries down after three starts and boots the old copy, whose
-`lightmoss-bless` makes it the default again and leaves
+On such a trial start, `lightmoss-bless` waits for spruce to be up (its boot
+jobs started, `spruce-launch.service` active and not restarting) and then
+renames the entry `lightmoss-N.conf` (kept). If spruce keeps failing, or is
+not up within 10 minutes, it restarts the device instead; a kernel panic
+(`panic=10`) or a root that never appears (`rootwait=30`, then a panic)
+restarts it too. Each start costs a try, and after three OpenABL boots the old
+copy, whose `lightmoss-bless` makes it the default again and leaves
 `/boot/lightmoss-update-failed` for the app to report. The running copy is
 never written, so the charger is not needed and a power cut at any point
-leaves the device starting as before.
+leaves the device starting as before. A kernel that hangs without panicking
+still needs the power key held (three times) before OpenABL falls back.
+
+A LightMoss running from a card has one system copy, the running one, so the
+app does not update it: install LightMoss on the internal storage, or make a
+new card (writing a card image over a card erases its `SPRUCEOS`).
+
+`board/rpminiv2/test-updater.sh` runs all of this on a build host against
+loop devices (`sudo board/rpminiv2/test-updater.sh BUSYBOX`), and CI checks
+each image with `board/rpminiv2/check-image.sh` before it can be released.
 
 This does not depend on UEFI variables: OpenABL's QSEECOM kernel patch for
 them is not in ROCKNIX's SM8250 kernel, so everything goes through files on
@@ -137,6 +158,10 @@ them is not in ROCKNIX's SM8250 kernel, so everything goes through files on
   `fs_mgr` formats a wiped `formattable` userdata; Retroid's fstab is not
   checked).
 - Boot counting: OpenABL renaming `lightmoss-N+3.conf` on each try.
+- A panic restarting into OpenABL (`panic=10`, not Qualcomm's download mode),
+  and `ro` + `systemd-fsck-root` + the remount read-write at every start.
+- An update over the air end to end, and the fallback after three failed
+  starts (`lightmoss-bless` restarting a copy whose spruce does not come up).
 
 ## Building
 
