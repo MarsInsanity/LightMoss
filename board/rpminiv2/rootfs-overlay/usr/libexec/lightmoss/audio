@@ -1,77 +1,178 @@
 #!/bin/sh
 # The Retroid Pocket's sound card (q6 audio DSP, WCD9385 headphone codec,
-# two WSA881x speaker amplifiers): switch it on, then follow the headphone
-# jack.
+# two WSA881x speaker amplifiers).
+#
+#   audio setup    switch the codecs on and route the output by the jack, once
+#                  (lightmoss-audio.service, a oneshot spruce-launch waits for)
+#   audio follow   follow the headphone jack from then on
+#                  (lightmoss-audio-jack.service)
+#   audio route    route by the jack again now (audio-resume, after suspend)
 #
 # ROCKNIX's UCM configuration (alsa-ucm-conf, HiFi verb) switches the codecs
 # on and routes frontend MultiMedia1 (hw:0,0) to the headphones and
-# MultiMedia2 (hw:0,1) to the speakers. spruce plays to hw:0,0 only (its
-# softvol "Master"; on this board without dArkMoss's dmix), so
-# MultiMedia1 goes to the speakers too while no headphones are in: one PCM,
-# whichever output is in use.
+# MultiMedia2 (hw:0,1) to the speakers, for PipeWire to reopen its stream on
+# the other PCM when the jack changes. spruce has no PipeWire: it plays to
+# hw:0,0 only (its softvol "Master", without dArkMoss's dmix), and a game
+# holds that PCM for as long as it runs. So MultiMedia1 is moved instead:
+# to the speakers while nothing is in the jack, to the headphones while
+# something is. The kernel (4-lightmoss/0071) moves an open stream along
+# with its route; 0070 counts a line-out load (an amplifier's input,
+# high-impedance headphones) as headphones.
 #
-# The jack state goes to /run/lightmoss/headphones (1 or 0) for spruce
-# (HEADPHONE_STATE_PATH). /boot/headphones-invert swaps it, for units that
-# report the jack the other way round.
-STATE=/run/lightmoss/headphones
-mkdir -p /run/lightmoss
+# The jack is the card's "Headphone Jack" control. Its interface is CARD,
+# not MIXER: amixer looks a control up as MIXER unless told otherwise, and
+# "name=Headphone Jack" alone was never found (every boot logged "headphones
+# out", whatever was plugged in).
+#
+# The state goes to /run/lightmoss/headphones (1 or 0) for spruce
+# (HEADPHONE_STATE_PATH, lightmoss-headphones). /boot/headphones-invert swaps
+# the jack, for units that report it the other way round.
+#
+# DisplayPort audio (USB-C) is not routed here: a DisplayPort backend that
+# cannot start (a display without audio, a dock without a picture) would take
+# MultiMedia1, the only PCM spruce plays to, down with it. ROCKNIX keeps it on
+# a PCM of its own (MultiMedia4) for that reason.
+RUN=/run/lightmoss
+STATE=$RUN/headphones
+READY=$RUN/audio-ready
+mkdir -p "$RUN"
 
-card=""
-n=0
-while [ -z "$card" ] && [ "$n" -lt 60 ]; do
-	for c in /proc/asound/card[0-9]*; do
-		[ -e "$c/id" ] || continue
-		case "$(cat "$c/id")" in
-			RetroidPocket*) card="${c##*/card}" ;;
-		esac
+log() { echo "lightmoss-audio: $*"; }
+
+# The card's index, by its id (RetroidPocket...): a USB sound card attached at
+# boot can take index 0. Waits up to $1 tenths of a second for it.
+find_card() {
+	_n=0
+	while :; do
+		for _c in /proc/asound/card[0-9]*; do
+			[ -e "$_c/id" ] || continue
+			case "$(cat "$_c/id" 2>/dev/null)" in
+				RetroidPocket*) card="${_c##*/card}"; return 0 ;;
+			esac
+		done
+		[ "$_n" -lt "$1" ] || return 1
+		if sleep 0.1 2>/dev/null; then
+			_n=$((_n + 1))
+		else
+			sleep 1
+			_n=$((_n + 10))
+		fi
 	done
-	[ -n "$card" ] || { sleep 1; n=$((n + 1)); }
-done
-[ -n "$card" ] || { echo "lightmoss-audio: no RetroidPocket sound card" >&2; exit 1; }
-
-cset() { amixer -q -c "$card" cset "name=$1" "$2" 2>/dev/null; }
-
-# One alsaucm run: the verb it sets is only known inside that process. The
-# codec settings stay when it exits.
-alsaucm -c "hw:$card" set _boot "" set _verb HiFi set _enadev Speaker set _enadev Headphones ||
-	echo "lightmoss-audio: alsaucm could not set up the card" >&2
-
-# ROCKNIX's UCM boots the speakers' digital gain at "120" on a -84..+40 dB
-# control, +36 dB, for PipeWire's software volume to bring down. Here only
-# spruce's softvol "Master" is in front of it: full-scale menu sounds clipped,
-# painfully loud. 84 is 0 dB, as the headphone path (RX_RX0/RX1 Digital
-# Volume) already is; the amplifiers' PA Volume stays. Set by the control's
-# value, as spruce's check does on the device (its log: "was 36 dB, set to
-# 0 dB"); the simple-mixer "sset ... 0dB" this used was never seen to take.
-for c in "WSA_RX0 Digital Volume" "WSA_RX1 Digital Volume"; do
-	cset "$c" 84 || echo "lightmoss-audio: could not set $c to 0 dB" >&2
-done
-
-jack() {
-	v="$(amixer -c "$card" cget "name=Headphone Jack" 2>/dev/null | sed -n 's/.*: values=\(.*\)/\1/p')"
-	case "$v" in on) j=1 ;; *) j=0 ;; esac
-	[ -e /boot/headphones-invert ] && j=$((1 - j))
-	echo "$j"
 }
 
+cset() { amixer -q -c "$card" cset "name=$1" "$2" >/dev/null 2>&1; }
+
+# 1 while headphones (or a line-out load) are in, else 0.
+jack() {
+	_v="$(amixer -c "$card" cget "iface=CARD,name=Headphone Jack" 2>/dev/null | sed -n 's/.*: values=\(.*\)/\1/p')"
+	case "$_v" in on) _j=1 ;; *) _j=0 ;; esac
+	[ -e /boot/headphones-invert ] && _j=$((1 - _j))
+	echo "$_j"
+}
+
+# route 1|0: MultiMedia1 to the headphones or the speakers. The old route is
+# switched off first: the routing driver keeps one port per stream, and a
+# backend whose switch is left on stays powered with nothing to play.
 route() {
 	if [ "$1" = 1 ]; then
-		cset "WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia1" 0
-		cset "RX_CODEC_DMA_RX_0 Audio Mixer MultiMedia1" 1
+		_off=WSA_CODEC_DMA_RX_0 _on=RX_CODEC_DMA_RX_0
 	else
-		cset "RX_CODEC_DMA_RX_0 Audio Mixer MultiMedia1" 0
-		cset "WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia1" 1
+		_off=RX_CODEC_DMA_RX_0 _on=WSA_CODEC_DMA_RX_0
 	fi
-	echo "$1" > "$STATE.new" && mv -f "$STATE.new" "$STATE"
-	echo "lightmoss-audio: headphones $( [ "$1" = 1 ] && echo in || echo out)"
+	cset "$_off Audio Mixer MultiMedia1" 0
+	cset "$_on Audio Mixer MultiMedia1" 1
 }
 
-last=""
-while :; do
-	now="$(jack)"
-	if [ "$now" != "$last" ]; then
-		route "$now"
-		last="$now"
+# Route by the jack when it differs from the recorded state, or always with
+# "force". A failed switch is retried once (a control write can fail while
+# the card is busy); the state is only recorded once the route is in.
+apply() {
+	_now="$(jack)"
+	_was="$(cat "$STATE" 2>/dev/null)"
+	[ "$1" = force ] || [ "$_now" != "$_was" ] || return 0
+	if ! route "$_now"; then
+		sleep 1
+		_now="$(jack)"
+		route "$_now" || { log "could not route the output (headphones $_now)"; return 1; }
 	fi
-	sleep 1
-done
+	echo "$_now" > "$STATE.new" && mv -f "$STATE.new" "$STATE"
+	log "headphones $( [ "$_now" = 1 ] && echo in || echo out)"
+	# spruce's menu (PyUI) reopens its audio when this appears, so it plays
+	# on the new output even on a kernel that cannot move an open stream.
+	if [ -n "$_was" ] && [ "$_now" != "$_was" ]; then
+		touch /tmp/audio_reinit_needed 2>/dev/null
+	fi
+	return 0
+}
+
+setup() {
+	# One alsaucm run: the verb it sets is only known inside that process. The
+	# codec settings stay when it exits. Headset (the microphone) last: its
+	# sequence only powers anything while something records (hw:0,2; ROCKNIX
+	# records S16_LE, as 24-bit capture came out as noise).
+	alsaucm -c "hw:$card" set _boot "" set _verb HiFi set _enadev Speaker \
+		set _enadev Headphones set _enadev Headset >/dev/null 2>&1 ||
+		log "alsaucm could not set up the whole card"
+
+	# ROCKNIX's UCM boots the speakers' digital gain at "120" on a -84..+40 dB
+	# control, +36 dB, for PipeWire's software volume to bring down. Here only
+	# spruce's softvol "Master" is in front of it: full-scale menu sounds
+	# clipped, painfully loud. 84 is 0 dB, as the headphone path (RX_RX0/RX1
+	# Digital Volume) already is; the amplifiers' PA Volume stays.
+	for _c in "WSA_RX0 Digital Volume" "WSA_RX1 Digital Volume"; do
+		cset "$_c" 84 || log "could not set $_c to 0 dB"
+	done
+
+	# The verb routed MultiMedia1 to the headphones: route it now, before
+	# anything opens hw:0,0 (spruce-launch waits for this).
+	rm -f "$STATE"
+	apply force
+	echo "$card" > "$READY"
+}
+
+case "$1" in
+setup)
+	rm -f "$READY"
+	# The card registers once the audio DSP is up, normally a second or two
+	# into boot. spruce waits for this unit, so not for ever: if the card is
+	# later than that, the jack follower sets it up when it comes.
+	find_card 100 || { log "no RetroidPocket sound card yet"; exit 0; }
+	setup
+	;;
+follow)
+	find_card 0 || {
+		log "waiting for the RetroidPocket sound card"
+		until find_card 0; do sleep 2; done
+	}
+	[ "$(cat "$READY" 2>/dev/null)" = "$card" ] || setup
+	# One line per control event on the card, flushed as it comes; only the
+	# jack's mean anything here. The card's other controls change with every
+	# volume step, which costs a case match, not a process. The line echoed a
+	# second in, once alsactl listens, catches a jack change made between
+	# setup and then, which no event would report any more.
+	if command -v alsactl >/dev/null 2>&1; then
+		{
+			alsactl monitor "hw:$card" 2>/dev/null &
+			sleep 1
+			echo "lightmoss-audio ,Headphone Jack, check"
+			wait
+		} | while IFS= read -r _line; do
+			case "$_line" in
+				*",Headphone Jack,"*) apply ;;
+			esac
+		done
+		log "lost the card's control events"
+		exit 1
+	fi
+	# No alsactl: look now and then instead.
+	while sleep 5; do apply; done
+	;;
+route)
+	find_card 20 || exit 1
+	apply force
+	;;
+*)
+	echo "usage: $0 setup|follow|route" >&2
+	exit 2
+	;;
+esac

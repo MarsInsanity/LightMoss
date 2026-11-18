@@ -1,12 +1,17 @@
 [Unit]
-Description=Retroid Pocket sound card: speakers and headphones
+Description=Retroid Pocket sound card: codecs on, output routed
+# A oneshot: units ordered after it (spruce-launch) start once the card is
+# set up and hw:0,0 goes to the right output, not as soon as the script runs.
+# It gives up waiting for the card after 10 s; the jack follower, which it
+# pulls in, sets up a later one.
 After=sound.target alsa-restore.service alsa-state.service lightmoss-boot.service
+Wants=lightmoss-audio-jack.service
 
 [Service]
-Type=simple
-ExecStart=/usr/libexec/lightmoss/audio
-Restart=on-failure
-RestartSec=3
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/lightmoss/audio setup
+TimeoutStartSec=30
 
 [Install]
 WantedBy=multi-user.target
