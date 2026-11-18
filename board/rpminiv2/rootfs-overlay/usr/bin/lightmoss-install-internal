@@ -97,13 +97,13 @@ if [ "$from_flag" = 0 ] && ! lm_power_ok 30; then
 fi
 int="$(lm_internal_disk)" || die "no Android userdata partition on the internal storage"
 dev="/dev/$int"
-ss="$(blockdev --getss "$dev")"
+ss="$(blockdev --getss "$dev")" || die "cannot read $dev's sector size"
 mb=$(( 1048576 / ss ))          # sectors per MiB
 # sysfs counts 512-byte sectors; sfdisk the disk's own.
 part_start() { echo $(( $(cat "/sys/class/block/${1#/dev/}/start") * 512 / ss )); }
 part_size() { echo $(( $(cat "/sys/class/block/${1#/dev/}/size") * 512 / ss )); }
 part_nr() { cat "/sys/class/block/${1#/dev/}/partition"; }
-ud="$(lm_part_named "$int" userdata)"
+ud="$(lm_part_named "$int" userdata)" || die "cannot find userdata on $dev"
 udn="$(part_nr "$ud")"
 ud_start="$(part_start "$ud")"
 ud_size="$(part_size "$ud")"
@@ -217,7 +217,7 @@ if [ -n "$lmsys1$lmsys2" ]; then
 			lightmoss-2*) from="${lmsys2:-$from}" ;;
 		esac
 		for f in $FLAGS; do
-			[ ! -e "$mnt/old/$f" ] || cp -a "$mnt/old/$f" "$mnt/keep/boot/" || true
+			[ ! -e "$mnt/old/$f" ] || cp "$mnt/old/$f" "$mnt/keep/boot/" || true
 		done
 		umount "$mnt/old"
 	fi
@@ -359,8 +359,9 @@ cp "$BOOTFILES"/* "$mnt/boot/lightmoss-1/"
 for f in "$LM_ROOT/boot/README-LightMoss.txt" "$LM_ROOT/boot/headphones-invert"; do
 	[ ! -e "$f" ] || cp "$f" "$mnt/boot/"
 done
+# Plain copies: FAT keeps no owners or modes.
 for f in "$mnt/keep/boot"/*; do
-	[ ! -e "$f" ] || cp -a "$f" "$mnt/boot/"
+	[ ! -e "$f" ] || cp "$f" "$mnt/boot/"
 done
 sync
 # Read back from the partition, not from the cache.

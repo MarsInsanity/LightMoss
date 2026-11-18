@@ -16,11 +16,14 @@ done_flag() {
 	sync
 }
 
-# No filesystem on the partition, and that for sure: blkid finds nothing
-# (it says the same when it cannot read), and its start reads fine.
+# No filesystem on the partition, and that for sure: blkid finds no type
+# (nor several, which it calls ambivalent), and the start of the partition
+# reads fine (blkid finds no type either when it cannot read).
 no_filesystem() {
-	blkid -p "$1" >/dev/null 2>&1
-	[ $? = 2 ] && dd if="$1" of=/dev/null bs=1M count=1 2>/dev/null
+	_t="$(blkid -p -o value -s TYPE "$1" 2>/dev/null)"
+	_rc=$?
+	[ -z "$_t" ] && { [ "$_rc" = 0 ] || [ "$_rc" = 2 ]; } &&
+		dd if="$1" of=/dev/null bs=1M count=1 2>/dev/null
 }
 
 disk="$(lm_root_disk)" || exit 1
