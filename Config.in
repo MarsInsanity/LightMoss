@@ -9,6 +9,20 @@ config BR2_LIGHTMOSS_LIB32
 	  in /usr/lib/arm-linux-gnueabihf (package lightmoss-lib32). Its
 	  glibc's loader searches that directory.
 
+config BR2_LIGHTMOSS_MESA3D_TURNIP
+	bool "Mesa Vulkan freedreno driver (Turnip)"
+	depends on BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_FREEDRENO
+	select BR2_PACKAGE_MESA3D_VULKAN_DRIVER
+	help
+	  Mesa's Vulkan driver for Adreno GPUs (Turnip,
+	  -Dvulkan-drivers=freedreno), which buildroot's mesa3d package
+	  has no option for: selecting its hidden Vulkan driver symbol
+	  gives mesa3d.mk the glslang host tool and the
+	  -Dvulkan-drivers option, and external.mk adds freedreno to
+	  it. Set only in configs/lightmoss_rpminiv2*_defconfig. The
+	  Khronos loader (BR2_PACKAGE_VULKAN_LOADER) is what programs
+	  link.
+
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/rk3326-mali/Config.in"
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/rk3326-uboot/Config.in"
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/hpjackd/Config.in"

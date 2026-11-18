@@ -83,6 +83,12 @@ BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_FREEDRENO=y
 BR2_PACKAGE_MESA3D_GBM=y
 BR2_PACKAGE_MESA3D_OPENGL_EGL=y
 BR2_PACKAGE_MESA3D_OPENGL_ES=y
+# Vulkan: Turnip (Mesa's freedreno Vulkan driver, this tree's option, see
+# Config.in) and the Khronos loader, libvulkan.so.1. Programs present
+# through VK_KHR_display. vulkaninfo, to check it on the device.
+BR2_LIGHTMOSS_MESA3D_TURNIP=y
+BR2_PACKAGE_VULKAN_LOADER=y
+BR2_PACKAGE_VULKAN_TOOLS=y
 # The 32-bit (armhf) runtime, from configs/lightmoss_rpminiv2_lib32_defconfig.
 BR2_PACKAGE_LIGHTMOSS_LIB32=y
 BR2_PACKAGE_ALSA_LIB=y
