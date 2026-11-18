@@ -1,30 +1,144 @@
 #!/bin/sh
-# Run by systemd around suspend (spruce's sleep goes through systemctl suspend).
-# Its output goes to the journal (lightmoss-debug exports it to /boot/logs).
+# Run by systemd around suspend ($1 = pre or post, $2 = suspend): spruce
+# sleeps with systemctl suspend, which starts suspend.target itself since
+# LightMoss has no logind. systemd runs every hook in this directory at the
+# same time (the stick lights and the fan have their own). The output goes to
+# the journal, which lightmoss-debug exports to /boot/logs.
 STATE=/run/lightmoss-sleep
-STATS=/sys/kernel/debug/suspend_stats
+NM=org.freedesktop.NetworkManager
+
+log() { echo "lightmoss-sleep: $*"; }
+
+debug_on() {
+	[ -e /boot/lightmoss-debug ] || grep -qw lightmoss.debug /proc/cmdline 2>/dev/null
+}
+
+# NetworkManager's own suspend handling, which logind's PrepareForSleep
+# signal drives on other systems and which never comes here. Sleep(true)
+# disconnects and lets go of every device, and answers once they are down
+# (or not within the timeout, asleep all the same). Sleep(false) manages them
+# again and reconnects; "Already awake" is harmless.
+nm_sleep() {
+	busctl --timeout=10 --auto-start=no call "$NM" /org/freedesktop/NetworkManager \
+		"$NM" Sleep b "$1" >/dev/null 2>&1
+}
+
+wifi_down() {
+	nm_sleep true && log "NetworkManager asleep"
+	# Then the radios themselves, by the kernel switch, so the Wi-Fi chip goes
+	# through suspend switched off rather than associated (ROCKNIX's sleep
+	# does the same). Only the ones that are on, noted, so that only those
+	# come back: a Wi-Fi the user turned off in spruce (NetworkManager blocks
+	# it the same way) stays off.
+	for r in /sys/class/rfkill/rfkill*; do
+		[ "$(cat "$r/type" 2>/dev/null)" = wlan ] || continue
+		[ "$(cat "$r/soft" 2>/dev/null)" = 0 ] || continue
+		echo 1 > "$r/soft" 2>/dev/null && cat "$r/name" >> "$STATE/rfkill" 2>/dev/null
+	done
+	[ -s "$STATE/rfkill" ] && log "Wi-Fi off: $(tr '\n' ' ' < "$STATE/rfkill")"
+}
+
+wifi_up() {
+	if [ -s "$STATE/rfkill" ]; then
+		for r in /sys/class/rfkill/rfkill*; do
+			[ "$(cat "$r/type" 2>/dev/null)" = wlan ] || continue
+			grep -qxF "$(cat "$r/name" 2>/dev/null)" "$STATE/rfkill" && echo 0 > "$r/soft" 2>/dev/null
+		done
+	fi
+	# Always, after the radios: a Sleep(true) that timed out still put
+	# NetworkManager to sleep, and it reads the switches when it wakes.
+	nm_sleep false
+}
+
+# CPU and GPU governors to powersave for the way down and back, as ROCKNIX's
+# SM8250 sleep.d/pre/002-freq does; restored as they were, minimum included
+# (spruce's performance mode pins the minimum at the top, where powersave
+# alone would change nothing). The GPU only: the UFS and bus devfreqs scale
+# themselves.
+clocks_down() {
+	for p in /sys/devices/system/cpu/cpufreq/policy*; do
+		[ -w "$p/scaling_governor" ] || continue
+		grep -qw powersave "$p/scaling_available_governors" 2>/dev/null || continue
+		gov=$(cat "$p/scaling_governor" 2>/dev/null) || continue
+		min=$(cat "$p/scaling_min_freq" 2>/dev/null) || continue
+		echo "$p $gov $min" >> "$STATE/cpufreq"
+		echo powersave > "$p/scaling_governor" 2>/dev/null
+		cat "$p/cpuinfo_min_freq" > "$p/scaling_min_freq" 2>/dev/null
+	done
+	for d in /sys/class/devfreq/*.gpu; do
+		[ -w "$d/governor" ] || continue
+		grep -qw powersave "$d/available_governors" 2>/dev/null || continue
+		gov=$(cat "$d/governor" 2>/dev/null) || continue
+		echo "$d $gov" >> "$STATE/devfreq"
+		echo powersave > "$d/governor" 2>/dev/null
+	done
+}
+
+clocks_up() {
+	if [ -f "$STATE/cpufreq" ]; then
+		while read -r p gov min; do
+			echo "$gov" > "$p/scaling_governor" 2>/dev/null
+			echo "$min" > "$p/scaling_min_freq" 2>/dev/null
+		done < "$STATE/cpufreq"
+	fi
+	if [ -f "$STATE/devfreq" ]; then
+		while read -r d gov; do
+			echo "$gov" > "$d/governor" 2>/dev/null
+		done < "$STATE/devfreq"
+	fi
+}
+
+# How the suspend went, by the kernel's count: "fail" going up, or a failed
+# device or step, means the suspend was refused; the wakeup IRQ (debug
+# kernels, CONFIG_PM_SLEEP_DEBUG) says what ended it.
+stats() {
+	s=
+	if [ -d /sys/power/suspend_stats ]; then
+		for f in success fail last_failed_dev last_failed_errno last_failed_step; do
+			s="$s $f=$(cat "/sys/power/suspend_stats/$f" 2>/dev/null)"
+		done
+	elif [ -r /sys/kernel/debug/suspend_stats ]; then
+		s=" $(tr -s ' \t\n' ' ' < /sys/kernel/debug/suspend_stats)"
+	fi
+	[ -r /sys/power/pm_wakeup_irq ] && s="$s wakeup_irq=$(cat /sys/power/pm_wakeup_irq 2>/dev/null)"
+	log "back from $2;$s"
+}
 
 case "$1" in
 pre)
+	rm -rf "$STATE"
 	mkdir -p "$STATE"
-	echo "lightmoss-sleep: entering $2; kernel offers: $(cat /sys/power/state 2>/dev/null)"
-	if grep -qw lightmoss.debug /proc/cmdline; then
-		echo 1 > /sys/power/pm_print_times 2>/dev/null
+	log "entering $2; kernel offers: $(cat /sys/power/state 2>/dev/null); mem_sleep: $(cat /sys/power/mem_sleep 2>/dev/null)"
+	# Debug (/boot/lightmoss-debug): the kernel logs every device's suspend
+	# and resume callback and how long it took, so a device that blocks or
+	# slows the suspend shows by name. Only on kernels with PM_SLEEP_DEBUG.
+	if debug_on; then
+		for f in pm_print_times pm_debug_messages; do
+			[ -w "/sys/power/$f" ] && echo 1 > "/sys/power/$f" 2>/dev/null
+		done
 	fi
 	# Dark at once, so sleep looks immediate.
 	for bl in /sys/class/backlight/*; do
 		[ -e "$bl/brightness" ] || continue
-		cat "$bl/brightness" > "$STATE/${bl##*/}" 2>/dev/null
+		cat "$bl/brightness" > "$STATE/backlight-${bl##*/}" 2>/dev/null
 		echo 0 > "$bl/brightness" 2>/dev/null
 	done
-	alsactl store -f "$STATE/asound.state" 2>/dev/null
+	wifi_down
+	clocks_down
+	# No alsactl store/restore here (r36s needs it, its codec loses state):
+	# the SM8250 codecs keep theirs in the kernel's register caches, and a
+	# restore would put back the route from before the suspend (and runs the
+	# UCM boot sequence). The output route is re-applied after resume instead.
 	;;
 post)
-	alsactl restore -f "$STATE/asound.state" 2>/dev/null
+	clocks_up
 	for bl in /sys/class/backlight/*; do
-		[ -f "$STATE/${bl##*/}" ] && cat "$STATE/${bl##*/}" > "$bl/brightness" 2>/dev/null
+		[ -f "$STATE/backlight-${bl##*/}" ] && cat "$STATE/backlight-${bl##*/}" > "$bl/brightness" 2>/dev/null
 	done
-	[ -r "$STATS" ] && echo "lightmoss-sleep: back from $2; $(tr -s ' \t\n' ' ' < "$STATS")"
+	# Headphones may have gone in or out while asleep (lightmoss-audio's).
+	[ -x /usr/libexec/lightmoss/audio-resume ] && timeout 10 /usr/libexec/lightmoss/audio-resume
+	wifi_up
+	stats "$@"
 	;;
 esac
 exit 0
