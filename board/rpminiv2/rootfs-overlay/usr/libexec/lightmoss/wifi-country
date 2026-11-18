@@ -1,0 +1,29 @@
+#!/bin/sh
+# The Wi-Fi country (regulatory domain), from LMBOOT's lightmoss-wifi-country.
+#
+# The QCA6390 (ath11k) keeps its own channel list: it takes the country from
+# a user's regulatory hint ("iw reg set"), which the kernel passes on to its
+# firmware, and without one keeps its board data's default. ROCKNIX sets one
+# (US unless the user picks another); LightMoss sets one only when the file
+# says so, so a device nobody configured keeps what it always had.
+#
+# The file: one line, a two-letter ISO 3166 country code (US, DE, JP, ...).
+# It is on the FAT boot partition, editable from a PC, and kept across
+# updates. The kernel keeps the last hint and hands it to a Wi-Fi device that
+# shows up later, so it does not matter whether ath11k is there yet.
+# (cfg80211.ieee80211_regdom=XX on the kernel command line does the same.)
+f=/boot/lightmoss-wifi-country
+[ -r "$f" ] || exit 0
+cc="$(sed -n 's/#.*//; s/[^A-Za-z0-9]//g; /./{p;q;}' "$f" | tr '[:lower:]' '[:upper:]')"
+case "$cc" in
+	[A-Z][A-Z]|00) ;;
+	*)
+		echo "wifi-country: $f: \"$cc\" is not a two-letter country code" >&2
+		exit 0
+		;;
+esac
+if iw reg set "$cc"; then
+	echo "wifi-country: $cc"
+else
+	echo "wifi-country: could not set $cc" >&2
+fi
