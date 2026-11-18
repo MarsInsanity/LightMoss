@@ -1,0 +1,301 @@
+#!/bin/sh
+# lightmoss-fan: the Retroid Pocket Mini V2's fan modes.
+#
+#   lightmoss-fan [status]       mode, fan zone temperature and trips, fan speed
+#   lightmoss-fan get            the saved mode
+#   lightmoss-fan set MODE       save MODE and switch to it now
+#   lightmoss-fan apply [--wait] switch to the saved mode (lightmoss-fan.service
+#                                at boot, waiting for the fan to show up)
+#
+# MODE is auto (the default), quiet, performance, max or off. spruce's labels
+# (Auto, Quiet, Performance, Max, Off) are taken as they are; spruce's Fan
+# Speed setting runs "lightmoss-fan set <label>".
+#
+# The kernel drives the fan. The device tree binds the pwm-fan cooling device
+# to the cluster1 thermal zone through six "active" trips, which put the fan at
+# levels 1, 2, 3, 4, 6 and 8 of 8 (PWM 51, 77, 102, 128, 179, 255), and the
+# step_wise governor follows them. A mode is a set of temperatures for those
+# six trips, written to the zone's trip_point_N_temp: nothing keeps running,
+# and the kernel goes on protecting the device whatever happens to this
+# script. "off" moves the trips up to 75-80 C, so the fan still comes on, and
+# goes to full speed quickly, if the chip ever gets that hot; "max" moves them
+# down to 1-6 C, so the fan always runs at full speed. The zone is polled every
+# two seconds (LightMoss's DT patch), so the fan settles on the new trips within
+# a few seconds of a change.
+#
+# Should no thermal zone drive the fan (a device tree without the cooling map),
+# "apply --wait" drives the fan's PWM itself, every 3 seconds, from the hottest
+# CPU or GPU zone, with the same trips and a 5 C hysteresis. No fan at all:
+# logged, exit 0.
+#
+# For tests against a mock tree, LIGHTMOSS_FAN_SYSFS, LIGHTMOSS_FAN_CONF and
+# LIGHTMOSS_FAN_WAIT replace /sys, the saved mode's file and the wait for the
+# fan (seconds).
+
+SYS="${LIGHTMOSS_FAN_SYSFS:-/sys}"
+CONF="${LIGHTMOSS_FAN_CONF:-/var/lib/lightmoss/fan}"
+HYST=5000
+# PWM with 0..6 of the trips reached (the DT's cooling levels for the trips).
+PWMS="0 51 77 102 128 179 255"
+# Seconds "apply --wait" gives the fan's driver to show up.
+WAIT="${LIGHTMOSS_FAN_WAIT:-30}"
+
+log() { echo "lightmoss-fan: $*" >&2; }
+
+# MODE from a mode or spruce label, or nothing (and 1) if it is neither.
+norm_mode() {
+	case "$1" in
+	auto | Auto | AUTO) MODE=auto ;;
+	quiet | Quiet | QUIET) MODE=quiet ;;
+	performance | Performance | PERFORMANCE) MODE=performance ;;
+	max | Max | MAX) MODE=max ;;
+	off | Off | OFF) MODE=off ;;
+	*) MODE="" ; return 1 ;;
+	esac
+}
+
+# TRIPS: the six trip temperatures of MODE (millidegrees C), coolest first.
+mode_trips() {
+	case "$MODE" in
+	performance) TRIPS="40000 48000 55000 61000 66000 71000" ;;
+	quiet) TRIPS="52000 62000 69000 75000 80000 85000" ;;
+	max) TRIPS="1000 2000 3000 4000 5000 6000" ;;
+	off) TRIPS="75000 76000 77000 78000 79000 80000" ;;
+	*) TRIPS="45000 55000 62000 68000 73000 78000" ;;
+	esac
+}
+
+# MODE: the saved mode, auto when there is none.
+load_mode() {
+	_m=""
+	[ -r "$CONF" ] && read -r _m <"$CONF"
+	norm_mode "$_m" || MODE=auto
+}
+
+# 47300 -> 47.3
+celsius() {
+	_c="$1"
+	_s=""
+	case "$_c" in
+	'' | *[!0-9-]* | ?*-*) echo "?" ; return ;;
+	-*) _s=- ; _c="${_c#-}" ;;
+	esac
+	echo "$_s$((_c / 1000)).$((_c % 1000 / 100))"
+}
+
+# The trip numbers of thermal zone $1 that drive the pwm-fan, lowest first.
+# The zone's cdevN entries link to its cooling devices, cdevN_trip_point says
+# which trip each binding belongs to.
+zone_fan_trips() {
+	for _c in "$1"/cdev*; do
+		case "${_c##*/}" in *_*) continue ;; esac
+		[ "$(cat "$_c/type" 2>/dev/null)" = pwm-fan ] || continue
+		cat "${_c}_trip_point" 2>/dev/null
+	done | sort -n -u
+}
+
+# The thermal zones with pwm-fan trips.
+fan_zones() {
+	for _z in "$SYS"/class/thermal/thermal_zone*; do
+		[ -n "$(zone_fan_trips "$_z")" ] && echo "$_z"
+	done
+}
+
+# The fan's hwmon directory (pwm-fan registers it as "pwmfan").
+fan_hwmon() {
+	for _h in "$SYS"/class/hwmon/hwmon*; do
+		if [ "$(cat "$_h/name" 2>/dev/null)" = pwmfan ] && [ -e "$_h/pwm1" ]; then
+			echo "$_h"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# pwm1_enable 0 is pwm-fan's hard off: it ignores every speed it is given,
+# the thermal zone's too. Nothing here sets it; undo it if something did.
+fan_enable() {
+	_h="$(fan_hwmon)" || return 0
+	if [ "$(cat "$_h/pwm1_enable" 2>/dev/null)" = 0 ]; then
+		log "the fan was hard off (pwm1_enable 0); giving it back its speed control"
+		echo 1 2>/dev/null >"$_h/pwm1_enable" || log "could not write $_h/pwm1_enable"
+	fi
+}
+
+# Writes MODE's trip temperatures to every zone that drives the fan; 1 when
+# there is none.
+apply_zones() {
+	_zones="$(fan_zones)"
+	[ -n "$_zones" ] || return 1
+	mode_trips
+	for _z in $_zones; do
+		_type="$(cat "$_z/type" 2>/dev/null)"
+		# shellcheck disable=SC2086 # one word per temperature
+		set -- $TRIPS
+		for _t in $(zone_fan_trips "$_z"); do
+			if [ $# -eq 0 ]; then
+				log "$_type: trip $_t drives the fan too, left at $(cat "$_z/trip_point_${_t}_temp" 2>/dev/null)"
+				continue
+			fi
+			echo "$1" 2>/dev/null >"$_z/trip_point_${_t}_temp" ||
+				log "$_type: could not set trip $_t to $1"
+			shift
+		done
+		[ $# -eq 0 ] || log "$_type: fewer fan trips than the mode has temperatures"
+		if [ "$(cat "$_z/mode" 2>/dev/null)" = disabled ]; then
+			log "$_type was disabled; enabling it"
+			echo enabled 2>/dev/null >"$_z/mode"
+		fi
+		log "$MODE: $_type fan trips at $(zone_trips_c "$_z") C"
+	done
+	return 0
+}
+
+# The fan trips of zone $1 as "45 55 62 ..." (degrees C).
+zone_trips_c() {
+	_out=""
+	for _t in $(zone_fan_trips "$1"); do
+		read -r _v <"$1/trip_point_${_t}_temp" 2>/dev/null || _v=""
+		_out="$_out${_out:+ }$(celsius "$_v")"
+	done
+	echo "$_out"
+}
+
+# Fallback for a fan no thermal zone drives: follow the hottest CPU or GPU zone
+# with the mode's trips, re-reading the saved mode every round.
+drive_pwm() {
+	_h="$1"
+	_temps=""
+	for _z in "$SYS"/class/thermal/thermal_zone*; do
+		case "$(cat "$_z/type" 2>/dev/null)" in
+		cpu* | cluster* | gpu*) _temps="$_temps $_z/temp" ;;
+		esac
+	done
+	if [ -z "$_temps" ]; then
+		log "no thermal zone drives the fan and no CPU/GPU zone to follow: fan left as it is"
+		return 0
+	fi
+	log "no thermal zone drives the fan: following the hottest CPU/GPU zone"
+	# Stopped (shutdown, systemctl stop): leave the fan at half speed rather
+	# than wherever it was, possibly off.
+	trap 'echo 128 2>/dev/null >"$_h/pwm1"; exit 0' INT TERM
+	_reached=0
+	_last=""
+	while :; do
+		load_mode
+		mode_trips
+		_hot=-274000
+		for _f in $_temps; do
+			read -r _v <"$_f" 2>/dev/null || continue
+			[ "$_v" -gt "$_hot" ] 2>/dev/null && _hot=$_v
+		done
+		# A trip counts once reached, until the temperature is HYST below it.
+		_n=0
+		_i=0
+		for _t in $TRIPS; do
+			_i=$((_i + 1))
+			if [ "$_hot" -ge "$_t" ] || { [ "$_i" -le "$_reached" ] && [ "$_hot" -gt $((_t - HYST)) ]; }; then
+				_n=$_i
+			fi
+		done
+		_reached=$_n
+		# shellcheck disable=SC2086 # one word per level
+		set -- $PWMS
+		shift "$_n"
+		if [ "$1" != "$_last" ]; then
+			[ "$(cat "$_h/pwm1_enable" 2>/dev/null)" = 0 ] && echo 1 2>/dev/null >"$_h/pwm1_enable"
+			if echo "$1" 2>/dev/null >"$_h/pwm1"; then
+				_last=$1
+			else
+				log "could not set the fan to $1"
+			fi
+		fi
+		sleep 3
+	done
+}
+
+status() {
+	load_mode
+	if [ -r "$CONF" ]; then
+		echo "mode: $MODE"
+	else
+		echo "mode: $MODE (nothing saved yet)"
+	fi
+	_zones="$(fan_zones)"
+	for _z in $_zones; do
+		read -r _v <"$_z/temp" 2>/dev/null || _v=""
+		echo "$(cat "$_z/type" 2>/dev/null): $(celsius "$_v") C; fan trips at $(zone_trips_c "$_z") C"
+	done
+	[ -n "$_zones" ] || echo "no thermal zone drives the fan"
+	if _h="$(fan_hwmon)"; then
+		_line="fan: PWM $(cat "$_h/pwm1" 2>/dev/null) of 255"
+		[ -r "$_h/fan1_input" ] && _line="$_line, $(cat "$_h/fan1_input" 2>/dev/null) rpm"
+		[ "$(cat "$_h/pwm1_enable" 2>/dev/null)" = 0 ] && _line="$_line, hard off (pwm1_enable 0)"
+		echo "$_line"
+	else
+		echo "fan: none found"
+	fi
+	for _c in "$SYS"/class/thermal/cooling_device*; do
+		[ "$(cat "$_c/type" 2>/dev/null)" = pwm-fan ] || continue
+		echo "fan level: $(cat "$_c/cur_state" 2>/dev/null) of $(cat "$_c/max_state" 2>/dev/null)"
+	done
+}
+
+# Saves MODE (only when it changes: spruce sets it at every start).
+save_mode() {
+	_old=""
+	[ -r "$CONF" ] && read -r _old <"$CONF"
+	[ "$_old" = "$MODE" ] && return 0
+	if mkdir -p "${CONF%/*}" && echo "$MODE" >"$CONF.new" && mv -f "$CONF.new" "$CONF"; then
+		return 0
+	fi
+	log "could not save $MODE to $CONF; it holds for this boot only"
+	rm -f "$CONF.new"
+}
+
+case "${1:-status}" in
+status)
+	status
+	;;
+get)
+	load_mode
+	echo "$MODE"
+	;;
+set | auto | Auto | quiet | Quiet | performance | Performance | max | Max | off | Off)
+	[ "$1" = set ] && shift
+	if ! norm_mode "$1"; then
+		log "unknown mode '$1' (auto, quiet, performance, max or off)"
+		exit 2
+	fi
+	save_mode
+	fan_enable
+	# No zone yet (the fan's driver not there yet, or the fallback loop
+	# running): the service applies the saved mode, or its loop picks it up.
+	apply_zones || log "$MODE saved; no thermal zone drives the fan now"
+	exit 0
+	;;
+apply)
+	if [ "$2" = --wait ]; then
+		_n=0
+		while ! fan_hwmon >/dev/null && [ "$_n" -lt "$WAIT" ]; do
+			sleep 1
+			_n=$((_n + 1))
+		done
+		# pwm-fan registers its cooling device right after its hwmon.
+		fan_hwmon >/dev/null && [ -z "$(fan_zones)" ] && sleep 1
+	fi
+	load_mode
+	fan_enable
+	apply_zones && exit 0
+	if _h="$(fan_hwmon)"; then
+		[ "$2" = --wait ] && drive_pwm "$_h"
+		exit 0
+	fi
+	log "no fan found (no pwm-fan hwmon device); nothing to do"
+	exit 0
+	;;
+*)
+	sed -n '2,8s/^# \{0,1\}//p' "$0" >&2
+	exit 2
+	;;
+esac
