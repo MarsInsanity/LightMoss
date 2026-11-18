@@ -1,0 +1,51 @@
+From 079f97d50f7b11686cb518af150172f49d37bed7 Mon Sep 17 00:00:00 2001
+From: LightMoss <noreply@github.com>
+Date: Wed, 18 Nov 2026 14:18:12 +0000
+Subject: [PATCH] arm64: dts: qcom: rpminiv2: report touch in the landscape
+ frame
+
+The Mini V2's 1080x1240 panel is mounted right side up (rotation = <90>,
+the connector's "panel orientation" is "Right Side Up"), so its right
+edge is at the top of the casing and the picture everything draws is
+1240x1080 landscape. The FocalTech touchscreen still reports the
+panel's portrait frame. DRM leaves it to userspace to turn touch with
+the picture, which ROCKNIX does in sway (map_to_output), but LightMoss
+has no compositor: SDL2/SDL3 programs, RetroArch's udev pointer and
+the emulators read the evdev node directly and got every touch turned
+90 degrees.
+
+Turn it here, once, for every reader: touchscreen-inverted-x and
+touchscreen-swapped-x-y make the driver report X = panel y (0..1239)
+and Y = 1079 - panel x (0..1079), the inverse of the 90 degree
+clockwise turn that puts the landscape picture on the panel. A touch at
+the panel's top-left corner (0,0), which is the bottom-left of the
+landscape picture, now reads (0,1079); the panel's top-right corner
+(1079,0) is the picture's top-left and reads (0,0). ROCKNIX's AYN Thor
+Lite bottom screen, the same CH13726A 1080x1240 panel with
+rotation = <90>, uses the same two properties.
+---
+ .../arm64/boot/dts/qcom/sm8250-retroidpocket-rpminiv2.dts | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rpminiv2.dts b/arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rpminiv2.dts
+index e5f4ac022..3263ef932 100644
+--- a/arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rpminiv2.dts
++++ b/arch/arm64/boot/dts/qcom/sm8250-retroidpocket-rpminiv2.dts
+@@ -16,6 +16,14 @@ &i2c13 {
+ 	touchscreen@38 {
+ 		touchscreen-size-x = <1080>;
+ 		touchscreen-size-y = <1240>;
++		/*
++		 * The panel is mounted right side up (rotation = <90>) and
++		 * nothing above the kernel turns touch with the picture, so
++		 * report the upright landscape frame: X = panel y (0..1239),
++		 * Y = 1079 - panel x (0..1079).
++		 */
++		touchscreen-inverted-x;
++		touchscreen-swapped-x-y;
+ 	};
+ };
+ 
+-- 
+2.43.0
+
