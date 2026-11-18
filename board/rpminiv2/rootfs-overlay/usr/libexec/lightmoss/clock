@@ -56,6 +56,17 @@ now="$(date +%s)"
 rtc="$(cat /sys/class/rtc/rtc0/since_epoch 2>/dev/null)"
 saved="$(mtime "$CLOCKFILE")"
 
+# A clock, RTC or timesyncd's saved time past the ceiling means files were
+# (or are being) stamped in the future: lightmoss-clock-files.service re-dates
+# them once the card is mounted.
+for t in "$now" "$rtc" "$saved"; do
+	case "$t" in '' | *[!0-9]*) continue ;; esac
+	if [ "$t" -ge "$CEILING" ]; then
+		mkdir -p /var/lib/lightmoss && : > /var/lib/lightmoss/clock-files-to-fix
+		break
+	fi
+done
+
 if ! plausible "$now"; then
 	if plausible "$rtc"; then
 		target="$rtc" from="the RTC"
