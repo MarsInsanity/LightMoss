@@ -1,0 +1,8 @@
+# LightMoss: Bluetooth. spruce starts bluetoothd and bluealsa (systemctl, as
+# on dArkMoss) when its Bluetooth setting is on, and stops them when it is
+# off. Enabled, they would start whenever the adapter appears
+# (bluetooth.target), whatever the setting.
+disable bluetooth.service
+disable bluealsa.service
+# bluealsa-aplay plays what a phone streams to this handheld: not wanted.
+disable bluealsa-aplay.service
