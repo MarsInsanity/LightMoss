@@ -1,19 +1,21 @@
 [Unit]
 Description=End what spruce left running before the filesystems are unmounted
 # Nothing to start (a oneshot with RemainAfterExit may have no ExecStart);
-# its stop is the point. Stopped at shutdown after
-# spruce-launch.service (Before=) and before local-fs.target (default
-# dependencies), so before /mnt/SDCARD, /tmp and /boot are unmounted. Without
+# its stop is the point. Stopped at shutdown after spruce-launch.service
+# (Before=) and before local-fs.target (default dependencies), so before
+# /mnt/SDCARD, /tmp and /boot are unmounted. Without
 # it spruce's leftovers (spruce-launch has KillMode=process) kept them busy,
 # every power-off logged "Failed unmounting /mnt/SDCARD", and the card was
 # only unmounted in systemd's last pass, after the journal had stopped.
 Before=spruce-launch.service
+# A game still running (a power-off from SSH or an update, not from spruce's
+# menu, which saves and closes it first) gets TERM and 10 s to save.
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStop=-/usr/libexec/lightmoss/spruce-leftovers 5
-TimeoutStopSec=20
+ExecStop=-/usr/libexec/lightmoss/spruce-leftovers 10
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target
