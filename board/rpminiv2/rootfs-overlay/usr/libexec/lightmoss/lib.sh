@@ -52,6 +52,15 @@ lm_disk_type() {
 	esac
 }
 
+# The card slot's disk (mmcblk0), without an eMMC's boot and RPMB areas.
+lm_card_disks() {
+	for _d in /sys/block/mmcblk*; do
+		[ -e "$_d" ] || continue
+		case "${_d##*/}" in *boot*|*rpmb*) continue ;; esac
+		echo "${_d##*/}"
+	done
+}
+
 # The internal disk: the UFS LUN that holds Android's userdata.
 lm_internal_disk() {
 	for _d in /sys/block/sd*; do

@@ -19,10 +19,8 @@ SD="$LM_ROOT/mnt/SDCARD"
 
 candidates() {
 	root_disk="$(lm_root_disk)"
-	for d in /sys/block/mmcblk*; do
-		[ -e "$d" ] || continue
-		disk="${d##*/}"
-		case "$disk" in *boot*|*rpmb*) continue ;; esac
+	for disk in $(lm_card_disks); do
+		d="/sys/block/$disk"
 		if [ "$disk" != "$root_disk" ]; then
 			for p in "$d/$disk"*; do
 				[ -e "$p/partition" ] || continue
