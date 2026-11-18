@@ -18,7 +18,7 @@ from the card, through the Mini V2 platform of the spruce fork
 | GPU | Mesa freedreno: OpenGL ES, EGL, GBM (64- and 32-bit). No Vulkan yet: buildroot 2025.11's Mesa package has no Turnip option. |
 | Firmware | The files ROCKNIX installs for SM8250, from linux-firmware 20260309 (`package/lightmoss-firmware-sm8250`). The DSPs' firmware also comes in a small initramfs with no `/init`, since they start before the root filesystem is mounted. |
 | Display | The panel scans out portrait (1080x1240) and is mounted landscape (`rotation = <90>`). LightMoss's SDL2 (64- and 32-bit) turns the primary plane 270 degrees on the SDE rotator (ROCKNIX's DPU patches) and shows programs a 1240x1080 display (`board/rpminiv2/patches/sdl2`), as dArkMoss's SDL does with RGA on the E5 Plus. PyUI (spruce's own SDL) turns its canvas itself. SDL3 (64- and 32-bit) does the same as SDL2 (`board/rpminiv2/patches/sdl3`). `SDL_KMSDRM_PANEL_ROTATION=0` turns it off for a test. |
-| Audio | ROCKNIX's Retroid UCM configuration (alsa-ucm-conf 1.2.14 + ROCKNIX's patches); `lightmoss-audio` routes `hw:0,0` to the speakers or the headphones, following the jack, and writes `/run/lightmoss/headphones` for spruce. |
+| Audio | ROCKNIX's Retroid UCM configuration (alsa-ucm-conf 1.2.14 + ROCKNIX's patches). `lightmoss-audio` (a oneshot spruce waits for) sets the card up and routes `hw:0,0` to the speakers or the headphones; `lightmoss-audio-jack` follows the jack's control events from then on, and writes `/run/lightmoss/headphones` for spruce. Kernel patches let a line-out load count as headphones and move an open stream along with its route. `/etc/asound.conf` links to `/run/lightmoss/asound.conf`, where spruce puts its ALSA configuration for programs whose `HOME` has none. |
 | Input | ROCKNIX's Retroid gamepad driver (the MCU on a UART), power key; the volume rocker's two keys (gpio-keys and the PMIC's resin) merged into one input device, "LightMoss Volume Keys" (`package/lightmoss-volkeys`), since spruce watches one node. |
 | Not yet | Bluetooth (the QCA6390's; spruce's platform does not offer it), Vulkan, SDL3 rotation, the RGB stick LEDs, the fan curve, USB gadget mode. |
 
@@ -102,7 +102,8 @@ them is not in ROCKNIX's SM8250 kernel, so everything goes through files on
   (270 by the panel orientation; `SDL_KMSDRM_PANEL_ROTATION=90` flips it).
 - The firmware initramfs (remoteprocs up, audio card present).
 - The audio routing of `hw:0,0` to the speakers (`WSA_CODEC_DMA_RX_0 Audio
-  Mixer MultiMedia1`) and the jack switching.
+  Mixer MultiMedia1`) and the jack switching, also while a game plays
+  (4-lightmoss/0071 moves the open stream; `journalctl -u lightmoss-audio-jack`).
 - The installer on a real GPT (`sfdisk -N` on userdata, 4 KiB UFS sectors,
   `sgdisk --resize-table`), and Android formatting userdata afterwards.
 - Boot counting: OpenABL renaming `lightmoss-N+3.conf` on each try.
