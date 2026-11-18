@@ -1,0 +1,16 @@
+[Unit]
+Description=Re-date files stamped while the clock read 2075
+Documentation=file:/usr/libexec/lightmoss/clock-files
+# Left by lightmoss-clock.service when it found an impossible clock.
+ConditionPathExists=/var/lib/lightmoss/clock-files-to-fix
+# spruce-launch mounts the card before it starts spruce.
+After=spruce-launch.service local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/lightmoss/clock-files
+Nice=19
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,33 @@
+#!/bin/sh
+# LightMoss (Retroid Pocket Mini V2): give the files stamped while the clock
+# read an impossible future (it booted in 2075, see /usr/libexec/lightmoss/clock)
+# the current time. lightmoss-clock leaves the flag below when it found such a
+# clock; this runs once the spruce card is mounted, and again on later boots
+# until it has seen the card.
+#
+# A 32-bit program (spruce's lib32 runtime: RetroArch32, drastic32, 32-bit
+# ports) cannot stat() a file dated after 2038 (EOVERFLOW), so a save, state
+# or config written in 2075 looks missing to it; such files would also sort
+# first in every newest-first list for good. Only files dated 2038 or later
+# are touched; the system's own files and everything else keep their times.
+
+FLAG=/var/lib/lightmoss/clock-files-to-fix
+CARD=/mnt/SDCARD
+REF=/run/lightmoss/clock-ceiling
+
+log() { echo "lightmoss-clock-files: $*"; }
+
+[ -e "$FLAG" ] || exit 0
+# 2038-01-01T00:00:00Z, the ceiling lightmoss-clock uses.
+mkdir -p /run/lightmoss && touch -d @2145916800 "$REF" || exit 0
+
+# The root filesystem and the card; /boot (FAT) is left alone.
+n="$(find / "$CARD" -xdev ! -type l -newer "$REF" -exec touch -c {} + -print 2>/dev/null | wc -l)"
+log "re-dated $n file(s) stamped after 2037"
+
+if mountpoint -q "$CARD"; then
+	rm -f "$FLAG"
+else
+	log "$CARD is not mounted; trying again next boot"
+fi
+exit 0
