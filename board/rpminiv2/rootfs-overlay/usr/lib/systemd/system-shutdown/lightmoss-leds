@@ -1,0 +1,5 @@
+#!/bin/sh
+# Power-off and reboot: the stick lights off, whatever spruce left lit (the
+# kernel's htr3212 shutdown does it too, see 4-lightmoss/0050).
+/usr/libexec/lightmoss/leds off
+exit 0

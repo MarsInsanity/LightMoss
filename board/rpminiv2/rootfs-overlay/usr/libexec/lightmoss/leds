@@ -1,0 +1,108 @@
+#!/bin/sh
+# The stick lights: a ring of four RGB LEDs round each stick, driven by two
+# HTR3212 controllers and grouped by the kernel (leds-group-multicolor) into
+# /sys/class/leds/rgb:l1..l4 and rgb:r1..r4. Colour is multi_intensity (in
+# multi_index order), level is brightness (0-255), effects are the pattern or
+# timer trigger. spruce sets them from its RGB LED settings; this turns them
+# off and puts them back as spruce left them.
+#
+#   leds off            every stick light off (any trigger removed)
+#   leds save DIR       record each light's colour, level and trigger in DIR
+#   leds restore DIR    put back what save recorded
+#
+# Missing lights (no driver, other board) are not an error: nothing to do.
+LEDS=${LIGHTMOSS_LEDS_SYSFS:-/sys/class/leds}
+
+# The multicolor lights only: the single-colour channels under them are named
+# l:r1, r:g2 and so on, have no multi_intensity, and reject writes anyway.
+stick_lights() {
+	for d in "$LEDS"/*:[lr][1-4]; do
+		[ -e "$d/multi_intensity" ] && echo "$d"
+	done
+}
+
+# The trigger in [brackets] in the trigger file.
+active_trigger() {
+	sed -n 's/.*\[\([^]]*\)\].*/\1/p' "$1/trigger" 2>/dev/null
+}
+
+lights_off() {
+	for d in $(stick_lights); do
+		echo 0 > "$d/brightness" 2>/dev/null
+	done
+}
+
+save() {
+	dir=$1
+	mkdir -p "$dir" || return 1
+	rm -f "$dir"/*.light
+	for d in $(stick_lights); do
+		f="$dir/${d##*/}.light"
+		trig=$(active_trigger "$d")
+		{
+			echo "trigger=${trig:-none}"
+			echo "multi_intensity=$(cat "$d/multi_intensity")"
+			echo "brightness=$(cat "$d/brightness")"
+			case "$trig" in
+			pattern)
+				echo "pattern=$(cat "$d/pattern")"
+				echo "repeat=$(cat "$d/repeat")"
+				;;
+			timer)
+				echo "delay_on=$(cat "$d/delay_on")"
+				echo "delay_off=$(cat "$d/delay_off")"
+				;;
+			esac
+		} > "$f.tmp" 2>/dev/null && mv "$f.tmp" "$f" || return 1
+	done
+}
+
+# One value from a saved light: the text after "key=".
+saved() {
+	sed -n "s/^$2=//p" "$1"
+}
+
+restore() {
+	dir=$1
+	for d in $(stick_lights); do
+		f="$dir/${d##*/}.light"
+		[ -f "$f" ] || continue
+		trig=$(saved "$f" trigger)
+		bri=$(saved "$f" brightness)
+		echo none > "$d/trigger" 2>/dev/null
+		saved "$f" multi_intensity > "$d/multi_intensity" 2>/dev/null
+		case "$trig" in
+		pattern)
+			echo pattern > "$d/trigger" 2>/dev/null
+			saved "$f" pattern > "$d/pattern" 2>/dev/null
+			rep=$(saved "$f" repeat)
+			[ -n "$rep" ] && [ "$rep" != -1 ] && echo "$rep" > "$d/repeat" 2>/dev/null
+			;;
+		timer)
+			# The level the blink lights at is the brightness set before it.
+			echo "${bri:-0}" > "$d/brightness" 2>/dev/null
+			echo timer > "$d/trigger" 2>/dev/null
+			saved "$f" delay_on > "$d/delay_on" 2>/dev/null
+			saved "$f" delay_off > "$d/delay_off" 2>/dev/null
+			;;
+		none|'')
+			echo "${bri:-0}" > "$d/brightness" 2>/dev/null
+			;;
+		*)
+			echo "${bri:-0}" > "$d/brightness" 2>/dev/null
+			echo "$trig" > "$d/trigger" 2>/dev/null
+			;;
+		esac
+	done
+	rm -f "$dir"/*.light
+}
+
+case "$1" in
+off) lights_off ;;
+save) [ -n "$2" ] && save "$2" ;;
+restore) [ -n "$2" ] && restore "$2" ;;
+*)
+	echo "usage: $0 off | save DIR | restore DIR" >&2
+	exit 2
+	;;
+esac
