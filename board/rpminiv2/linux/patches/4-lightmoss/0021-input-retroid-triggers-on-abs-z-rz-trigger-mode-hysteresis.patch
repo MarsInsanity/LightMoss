@@ -1,0 +1,262 @@
+From 6a909d929df8206cb37dbfa99a7b2da1576eff1b Mon Sep 17 00:00:00 2001
+From: LightMoss <noreply@github.com>
+Date: Wed, 18 Nov 2026 14:27:47 +0000
+Subject: [PATCH] input: retroid: triggers on ABS_Z/ABS_RZ, a trigger mode,
+ hysteresis
+
+The driver reported the left trigger on ABS_HAT2X and the right one on
+ABS_HAT2Y, while ABS_Z and ABS_RZ were declared with stick ranges and never
+reported. SDL's own mapping (and the Linux gamepad documentation) takes
+ABS_HAT2Y for the left trigger and ABS_HAT2X for the right, so every SDL
+program without an explicit mapping had L2 and R2 swapped; RetroArch's
+udev driver does not count hats as axes at all and folds them into a
+d-pad, so analog L2/R2 could not be bound. ROCKNIX only gets away with it
+because InputPlumber remaps the raw device.
+
+Report the left trigger on ABS_Z and the right one on ABS_RZ, 0 at rest
+up to trigger_*_max - trigger_*_antideadzone, as xpad does, and stop
+declaring ABS_HAT2X/ABS_HAT2Y. The axis numbers of the sticks do not
+change (SDL and RetroArch: 0/1 left, 3/4 right; the triggers become 2
+and 5).
+
+BTN_TL2/BTN_TR2, added by LightMoss for front ends that want buttons,
+toggled at exactly half travel with no hysteresis, so a trigger held near
+the middle chattered. They now press past trigger_press_percent (50) of
+the travel and release below trigger_release_percent (40), and are
+reported before the axis in each frame.
+
+trigger_mode (writable at runtime in /sys/module/retroid/parameters)
+chooses what the triggers report: 0 (analog, the default) the axes and
+the buttons, 1 (digital) the buttons only, with the axes held at 0 so
+nothing sees analog input. The buttons are declared in both modes, so
+key numbering never changes.
+---
+ drivers/input/joystick/retroid.c | 147 ++++++++++++++++++++++++-------
+ 1 file changed, 115 insertions(+), 32 deletions(-)
+
+diff --git a/drivers/input/joystick/retroid.c b/drivers/input/joystick/retroid.c
+index d54963616..1782478db 100644
+--- a/drivers/input/joystick/retroid.c
++++ b/drivers/input/joystick/retroid.c
+@@ -76,6 +76,9 @@ struct gamepad_device {
+ 	size_t rx_len;
+ 	unsigned int rx_unframed;
+ 	bool rx_legacy;
++	/* BTN_TL2/BTN_TR2 as last reported (with hysteresis). */
++	bool l2_down;
++	bool r2_down;
+ };
+ 
+ static const u8 gamepad_frame_magic[4] = { 0xA5, 0xD3, 0x5A, 0x3D };
+@@ -83,6 +86,50 @@ static const u8 gamepad_frame_magic[4] = { 0xA5, 0xD3, 0x5A, 0x3D };
+ static bool rumble_enable = true;
+ module_param(rumble_enable, bool, 0660);
+ 
++/*
++ * L2/R2 are analog. They are reported on ABS_Z (left) and ABS_RZ (right),
++ * 0 at rest, and as BTN_TL2/BTN_TR2, pressed past trigger_press_percent of
++ * their travel and released below trigger_release_percent. trigger_mode
++ * 0 (analog): both; 1 (digital): the buttons only, the axes stay at 0 so
++ * nothing sees analog input. All of them can be changed at any time.
++ */
++#define TRIGGER_MODE_ANALOG 0
++#define TRIGGER_MODE_DIGITAL 1
++
++static unsigned int trigger_mode = TRIGGER_MODE_ANALOG;
++static unsigned int trigger_press_percent = 50;
++static unsigned int trigger_release_percent = 40;
++
++static int trigger_mode_set(const char *val, const struct kernel_param *kp)
++{
++	return param_set_uint_minmax(val, kp, TRIGGER_MODE_ANALOG,
++				     TRIGGER_MODE_DIGITAL);
++}
++
++static int trigger_percent_set(const char *val, const struct kernel_param *kp)
++{
++	return param_set_uint_minmax(val, kp, 1, 99);
++}
++
++static const struct kernel_param_ops trigger_mode_ops = {
++	.set = trigger_mode_set,
++	.get = param_get_uint,
++};
++
++static const struct kernel_param_ops trigger_percent_ops = {
++	.set = trigger_percent_set,
++	.get = param_get_uint,
++};
++
++module_param_cb(trigger_mode, &trigger_mode_ops, &trigger_mode, 0644);
++MODULE_PARM_DESC(trigger_mode, "L2/R2: 0 = analog axes and buttons, 1 = buttons only");
++module_param_cb(trigger_press_percent, &trigger_percent_ops,
++		&trigger_press_percent, 0644);
++MODULE_PARM_DESC(trigger_press_percent, "Travel (%) past which BTN_TL2/BTN_TR2 press");
++module_param_cb(trigger_release_percent, &trigger_percent_ops,
++		&trigger_release_percent, 0644);
++MODULE_PARM_DESC(trigger_release_percent, "Travel (%) below which BTN_TL2/BTN_TR2 release");
++
+ static int update_params=0;
+ 
+ static int trigger_left_max=0x610;
+@@ -105,6 +152,10 @@ static int axis_lefty_max=0x580;
+ static int axis_lefty_deadzone=0x0;
+ static int axis_lefty_antideadzone=0x0;
+ 
++/*
++ * axis_leftz_* and axis_rightz_* are kept as parameters but unused: ABS_Z
++ * and ABS_RZ carry the triggers (trigger_left_* and trigger_right_*).
++ */
+ static int axis_leftz_min=-0x580;
+ static int axis_leftz_center=0x0;
+ static int axis_leftz_max=0x580;
+@@ -211,6 +262,41 @@ static void gamepad_send_init_sequence(struct serdev_device *serdev)
+ 	msleep(100);
+ }
+ 
++/* The axis range of a trigger, never empty. */
++static int gamepad_trigger_range(int top, int antideadzone)
++{
++	return max(top - antideadzone, 1);
++}
++
++/*
++ * One trigger: raw counts down from about top (trigger_*_max) at rest.
++ * The button is reported before the axis, so that a reader applying events
++ * in order ends a frame on the analog value even where both are bound to
++ * one control.
++ */
++static void gamepad_report_trigger(struct input_dev *indev,
++				   unsigned int axis, unsigned int button,
++				   bool *down, int raw, int top, int deadzone,
++				   int antideadzone)
++{
++	int range = gamepad_trigger_range(top, antideadzone);
++	unsigned int press = READ_ONCE(trigger_press_percent);
++	unsigned int release = min(READ_ONCE(trigger_release_percent), press);
++	int value = (int16_t)(top - raw);
++
++	value = value < deadzone ? 0 : value - antideadzone;
++	value = clamp(value, 0, range);
++
++	if (*down)
++		*down = (s64)value * 100 >= (s64)range * release;
++	else
++		*down = (s64)value * 100 > (s64)range * press;
++
++	input_report_key(indev, button, *down);
++	input_report_abs(indev, axis,
++			 READ_ONCE(trigger_mode) == TRIGGER_MODE_DIGITAL ? 0 : value);
++}
++
+ static void gamepad_input_handler(struct gamepad_device *dev,
+ 				  struct gamepad_data *data)
+ {
+@@ -234,10 +320,9 @@ static void gamepad_input_handler(struct gamepad_device *dev,
+ 			INT_SIGN(axis_lefty_min) * ( abs(axis_lefty_min) - axis_lefty_antideadzone ),
+ 			INT_SIGN(axis_lefty_max) * ( abs(axis_lefty_max) - axis_lefty_antideadzone ),
+ 			 0, 0);
+-		input_set_abs_params(indev, ABS_Z,
+-			INT_SIGN(axis_leftz_min) * ( abs(axis_leftz_min) - axis_leftz_antideadzone ),
+-			INT_SIGN(axis_leftz_max) * ( abs(axis_leftz_max) - axis_leftz_antideadzone ),
+-			 0, 0);
++		input_set_abs_params(indev, ABS_Z, 0,
++			gamepad_trigger_range(trigger_left_max, trigger_left_antideadzone),
++			0, 0);
+ 
+ 		input_set_abs_params(indev, ABS_RX,
+ 			INT_SIGN(axis_rightx_min) * ( abs(axis_rightx_min) - axis_rightx_antideadzone ),
+@@ -247,13 +332,9 @@ static void gamepad_input_handler(struct gamepad_device *dev,
+ 			INT_SIGN(axis_righty_min) * ( abs(axis_righty_min) - axis_righty_antideadzone ),
+ 			INT_SIGN(axis_righty_max) * ( abs(axis_righty_max) - axis_righty_antideadzone ),
+ 			 0, 0);
+-		input_set_abs_params(indev, ABS_RZ,
+-			INT_SIGN(axis_rightz_min) * ( abs(axis_rightz_min) - axis_rightz_antideadzone ),
+-			INT_SIGN(axis_rightz_max) * ( abs(axis_rightz_max) - axis_rightz_antideadzone ),
+-			 0, 0);
+-
+-		input_set_abs_params(indev, ABS_HAT2X, 0, trigger_left_max - trigger_left_antideadzone, 0, 30);
+-		input_set_abs_params(indev, ABS_HAT2Y, 0, trigger_right_max - trigger_right_antideadzone, 0, 30);
++		input_set_abs_params(indev, ABS_RZ, 0,
++			gamepad_trigger_range(trigger_right_max, trigger_right_antideadzone),
++			0, 0);
+ 		update_params = 0;
+ 	}
+ 
+@@ -266,17 +347,14 @@ static void gamepad_input_handler(struct gamepad_device *dev,
+ 
+ 	int16_t value;
+ 
+-	value = (int16_t)(trigger_left_max - (data->data[2] | (data->data[3] << 8)));
+-	input_report_abs(indev, ABS_HAT2X,
+-			 ( value < trigger_left_deadzone )? 0 : value - trigger_left_antideadzone);
+-	input_report_key(indev, BTN_TL2,
+-			 value > (trigger_left_max - trigger_left_antideadzone) / 2);
+-
+-	value = (int16_t)(trigger_right_max - (data->data[4] | (data->data[5] << 8)));
+-	input_report_abs(indev, ABS_HAT2Y,
+-			 ( value < trigger_right_deadzone )? 0 : value - trigger_right_antideadzone);
+-	input_report_key(indev, BTN_TR2,
+-			 value > (trigger_right_max - trigger_right_antideadzone) / 2);
++	gamepad_report_trigger(indev, ABS_Z, BTN_TL2, &dev->l2_down,
++			       data->data[2] | (data->data[3] << 8),
++			       trigger_left_max, trigger_left_deadzone,
++			       trigger_left_antideadzone);
++	gamepad_report_trigger(indev, ABS_RZ, BTN_TR2, &dev->r2_down,
++			       data->data[4] | (data->data[5] << 8),
++			       trigger_right_max, trigger_right_deadzone,
++			       trigger_right_antideadzone);
+ 
+ 	value = -(int16_t)(data->data[6] | (data->data[7] << 8));
+ 	value += axis_leftx_center;
+@@ -573,7 +651,10 @@ static int gamepad_mcu_uart_probe(struct serdev_device *serdev)
+ 	__set_bit(EV_KEY, gamepad_dev->dev_input->evbit);
+ 	for (int i = 0; i < ARRAY_SIZE(keymap); i++)
+ 		input_set_capability(gamepad_dev->dev_input, EV_KEY, keymap[i]);
+-	/* L2/R2 are analog; LightMoss also reports them as buttons. */
++	/*
++	 * L2/R2 are analog; LightMoss also reports them as buttons, in both
++	 * trigger modes, so that the key numbering never changes.
++	 */
+ 	input_set_capability(gamepad_dev->dev_input, EV_KEY, BTN_TL2);
+ 	input_set_capability(gamepad_dev->dev_input, EV_KEY, BTN_TR2);
+ 
+@@ -587,9 +668,15 @@ static int gamepad_mcu_uart_probe(struct serdev_device *serdev)
+ 		INT_SIGN(axis_lefty_min) * ( abs(axis_lefty_min) - axis_lefty_antideadzone ),
+ 		INT_SIGN(axis_lefty_max) * ( abs(axis_lefty_max) - axis_lefty_antideadzone ),
+ 		0, 0);
+-	input_set_abs_params(gamepad_dev->dev_input, ABS_Z,
+-		INT_SIGN(axis_leftz_min) * ( abs(axis_leftz_min) - axis_leftz_antideadzone ),
+-		INT_SIGN(axis_leftz_max) * ( abs(axis_leftz_max) - axis_leftz_antideadzone ),
++	/*
++	 * The triggers, 0 at rest, where xpad and most front ends (RetroArch's
++	 * udev driver only counts ABS_Z/ABS_RZ as analog triggers) expect
++	 * them. No ABS_HAT2X/ABS_HAT2Y: the driver this comes from put the left
++	 * trigger on HAT2X, the reverse of what SDL and the Linux gamepad
++	 * documentation take HAT2X for, and RetroArch reads hats as d-pads.
++	 */
++	input_set_abs_params(gamepad_dev->dev_input, ABS_Z, 0,
++		gamepad_trigger_range(trigger_left_max, trigger_left_antideadzone),
+ 		0, 0);
+ 
+ 	input_set_abs_params(gamepad_dev->dev_input, ABS_RX,
+@@ -600,14 +687,10 @@ static int gamepad_mcu_uart_probe(struct serdev_device *serdev)
+ 		INT_SIGN(axis_righty_min) * ( abs(axis_righty_min) - axis_righty_antideadzone ),
+ 		INT_SIGN(axis_righty_max) * ( abs(axis_righty_max) - axis_righty_antideadzone ),
+ 		0, 0);
+-	input_set_abs_params(gamepad_dev->dev_input, ABS_RZ,
+-		INT_SIGN(axis_rightz_min) * ( abs(axis_rightz_min) - axis_rightz_antideadzone ),
+-		INT_SIGN(axis_rightz_max) * ( abs(axis_rightz_max) - axis_rightz_antideadzone ),
++	input_set_abs_params(gamepad_dev->dev_input, ABS_RZ, 0,
++		gamepad_trigger_range(trigger_right_max, trigger_right_antideadzone),
+ 		0, 0);
+ 
+-		input_set_abs_params(gamepad_dev->dev_input, ABS_HAT2X, 0, trigger_left_max - trigger_left_antideadzone, 0, 30);
+-		input_set_abs_params(gamepad_dev->dev_input, ABS_HAT2Y, 0, trigger_right_max - trigger_right_antideadzone, 0, 30);
+-
+ 		input_set_capability(gamepad_dev->dev_input, EV_FF, FF_RUMBLE);
+ 		input_ff_create_memless(gamepad_dev->dev_input, NULL, retroid_rumble_play);
+ 
+-- 
+2.43.0
+
