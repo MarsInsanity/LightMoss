@@ -52,7 +52,7 @@ index 738622604..f6b61ab1b 100644
  }
  EXPORT_SYMBOL_GPL(q6routing_stream_close);
  
-@@ -484,6 +487,83 @@ static int msm_routing_get_audio_mixer(struct snd_kcontrol *kcontrol,
+@@ -484,6 +487,88 @@ static int msm_routing_get_audio_mixer(struct snd_kcontrol *kcontrol,
  	return 0;
  }
  
@@ -84,6 +84,11 @@ index 738622604..f6b61ab1b 100644
 +
 +	/* Not streaming (nothing is mapped yet), or routed elsewhere again. */
 +	if (!session->copp_map || session->port_id != be_id)
++		goto out;
++
++	/* Playback only: a capture (TX) mixer of the same frontend shares the slot. */
++	if (session->path_type != ADM_PATH_PLAYBACK ||
++	    pdata->path_type != ADM_PATH_PLAYBACK)
 +		goto out;
 +
 +	if (!pdata->sample_rate) {
@@ -136,7 +141,7 @@ index 738622604..f6b61ab1b 100644
  static int msm_routing_put_audio_mixer(struct snd_kcontrol *kcontrol,
  				       struct snd_ctl_elem_value *ucontrol)
  {
-@@ -503,6 +583,7 @@ static int msm_routing_put_audio_mixer(struct snd_kcontrol *kcontrol,
+@@ -503,6 +588,7 @@ static int msm_routing_put_audio_mixer(struct snd_kcontrol *kcontrol,
  
  		session->port_id = be_id;
  		snd_soc_dapm_mixer_update_power(dapm, kcontrol, 1, update);
