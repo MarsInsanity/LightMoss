@@ -39,9 +39,14 @@ source size of a primary plane turned by 90 or 270 degrees.
   program finds it as it was; the next present then sets the CRTC
   again, turning the plane first. The kernel's fbdev restore resets it
   too.
-- A plane that refuses leaves the panel unturned and its sides
-  unswapped from then on: the swapchain made for the swapped size is
-  lost, the next one is not turned.
+- A plane that refuses (other than for want of DRM master) is set
+  upright (an earlier mode set may have turned it) and leaves the panel
+  unturned and its sides unswapped from then on. The swapchain made for
+  the swapped size no longer fits the mode: its present returns
+  VK_ERROR_OUT_OF_DATE_KHR without trying the mode set, and the
+  application's next swapchain, of the size the surface now reports,
+  is shown unturned (sideways). A refused 180 changes no sizes, so the
+  mode set goes ahead.
 
 MESA_KMS_PANEL_ROTATION=0 leaves the panel alone; 90, 180 or 270 turn
 it by that many degrees (counter-clockwise, as DRM counts). An SDL
@@ -104,7 +109,7 @@ diff --git a/src/vulkan/wsi/wsi_common_display.c b/src/vulkan/wsi/wsi_common_dis
  static bool
  wsi_display_mode_matches_drm(wsi_display_mode *wsi,
                               drmModeModeInfoPtr drm)
-@@ -276,6 +305,311 @@
+@@ -276,6 +305,322 @@
  }
  
  /*
@@ -128,8 +133,9 @@ diff --git a/src/vulkan/wsi/wsi_common_display.c b/src/vulkan/wsi/wsi_common_dis
 + * CRTC no longer shows one of our images (the swapchain's framebuffers are
 + * removed, which disables the plane), so the next program finds it as it
 + * was; the kernel's fbdev restore also resets it. A plane that refuses
-+ * leaves the display unturned and its sides unswapped from then on (the
-+ * swapchain made for the swapped size is lost; a new one is not turned).
++ * is set upright and leaves the display unturned and its sides unswapped
++ * from then on: the swapchain made for the swapped size is out of date,
++ * and the application's next one is not turned.
 + *
 + * MESA_KMS_PANEL_ROTATION overrides it: "0" leaves the panel alone, "90",
 + * "180" or "270" turns the plane by that many degrees (counter-clockwise,
@@ -336,19 +342,22 @@ diff --git a/src/vulkan/wsi/wsi_common_display.c b/src/vulkan/wsi/wsi_common_dis
 +
 +/* Turns the primary plane of the connector's CRTC, right before
 + * drmModeSetCrtc(). A plane that refuses (other than for want of DRM master)
-+ * leaves the panel unturned and its sides unswapped from then on.
++ * leaves the panel unturned and its sides unswapped from then on, and is set
++ * upright, in case an earlier mode set turned it. Returns false when that
++ * swapped the display's sides back: the swapchain's images, made for the
++ * swapped size, no longer fit the CRTC's mode.
 + */
-+static void
++static bool
 +wsi_display_turn_panel(struct wsi_display *wsi,
 +                       struct wsi_display_connector *connector)
 +{
 +   if (!connector->rot_value)
-+      return;
++      return true;
 +
 +   if (!connector->rot_plane_id || connector->rot_crtc_id != connector->crtc_id) {
 +      drmModeResPtr mode_res = drmModeGetResources(wsi->fd);
 +      if (!mode_res)
-+         return;
++         return true;
 +      connector->rot_plane_id =
 +         wsi_display_crtc_primary_plane(wsi->fd, mode_res, connector->crtc_id,
 +                                        connector->rot_value,
@@ -372,16 +381,23 @@ diff --git a/src/vulkan/wsi/wsi_common_display.c b/src/vulkan/wsi/wsi_common_dis
 +                   (unsigned) connector->rot_value);
 +      }
 +      connector->rot_on = true;
-+      return;
++      return true;
 +   }
 +   if (ret == -EACCES)
-+      return;
++      return true;
 +
 +   mesa_logw("display: could not turn the panel's plane (%s); presenting "
 +             "it unturned", strerror(-ret));
++   if (connector->rot_plane_id && connector->rot_prop_id) {
++      drmModeObjectSetProperty(wsi->fd, connector->rot_plane_id,
++                               DRM_MODE_OBJECT_PLANE, connector->rot_prop_id,
++                               DRM_MODE_ROTATE_0);
++   }
++   const bool swapped = connector->rot_swap;
 +   connector->rot_value = 0;
 +   connector->rot_swap = false;
 +   connector->rot_on = false;
++   return !swapped;
 +}
 +
 +/* Turns the plane upright again once the CRTC shows nothing of ours: the
@@ -416,7 +432,7 @@ diff --git a/src/vulkan/wsi/wsi_common_display.c b/src/vulkan/wsi/wsi_common_dis
   * Update our information about a specific connector
   */
  
-@@ -359,6 +693,12 @@
+@@ -359,6 +704,12 @@
        drmModeFreeProperty(prop);
     }
  
@@ -429,7 +445,7 @@ diff --git a/src/vulkan/wsi/wsi_common_display.c b/src/vulkan/wsi/wsi_common_dis
     /* Mark all connector modes as invalid */
     wsi_display_invalidate_connector_modes(connector);
  
-@@ -421,11 +761,15 @@
+@@ -421,11 +772,15 @@
     }
  
     if (preferred_mode) {
@@ -449,7 +465,7 @@ diff --git a/src/vulkan/wsi/wsi_common_display.c b/src/vulkan/wsi/wsi_common_dis
     } else {
        properties->physicalResolution.width = 1024;
        properties->physicalResolution.height = 768;
-@@ -678,8 +1022,8 @@
+@@ -678,8 +1033,8 @@
     VkDisplayModePropertiesKHR *prop = &properties->displayModeProperties;
  
     prop->displayMode = wsi_display_mode_to_handle(display_mode);
@@ -460,7 +476,7 @@ diff --git a/src/vulkan/wsi/wsi_common_display.c b/src/vulkan/wsi/wsi_common_dis
     prop->parameters.refreshRate =
        (uint32_t) (wsi_display_mode_refresh(display_mode) * 1000 + 0.5);
  }
-@@ -738,8 +1082,8 @@
+@@ -738,8 +1093,8 @@
  wsi_display_mode_matches_vk(wsi_display_mode *wsi,
                              const VkDisplayModeParametersKHR *vk)
  {
@@ -471,7 +487,7 @@ diff --git a/src/vulkan/wsi/wsi_common_display.c b/src/vulkan/wsi/wsi_common_dis
             fabs(wsi_display_mode_refresh(wsi) * 1000.0 - vk->refreshRate) < 10);
  }
  
-@@ -792,18 +1136,18 @@
+@@ -792,18 +1147,18 @@
     pCapabilities->minSrcPosition.y = 0;
     pCapabilities->maxSrcPosition.x = 0;
     pCapabilities->maxSrcPosition.y = 0;
@@ -498,7 +514,7 @@ diff --git a/src/vulkan/wsi/wsi_common_display.c b/src/vulkan/wsi/wsi_common_dis
     return VK_SUCCESS;
  }
  
-@@ -894,8 +1238,8 @@
+@@ -894,8 +1249,8 @@
     VkIcdSurfaceDisplay *surface = (VkIcdSurfaceDisplay *) surface_base;
     wsi_display_mode *mode = wsi_display_mode_from_handle(surface->displayMode);
  
@@ -509,7 +525,7 @@ diff --git a/src/vulkan/wsi/wsi_common_display.c b/src/vulkan/wsi/wsi_common_dis
  
     caps->minImageExtent = (VkExtent2D) { 1, 1 };
     caps->maxImageExtent = (VkExtent2D) {
-@@ -1122,7 +1466,8 @@
+@@ -1122,7 +1477,8 @@
        vk_outarray_append_typed(VkRect2D, &out, rect) {
           *rect = (VkRect2D) {
              .offset = { 0, 0 },
@@ -519,7 +535,7 @@ diff --git a/src/vulkan/wsi/wsi_common_display.c b/src/vulkan/wsi/wsi_common_dis
           };
        }
     }
-@@ -1228,6 +1573,10 @@
+@@ -1228,6 +1584,10 @@
     for (uint32_t i = 0; i < chain->base.image_count; i++)
        wsi_display_image_finish(drv_chain, &chain->images[i]);
  
@@ -530,19 +546,28 @@ diff --git a/src/vulkan/wsi/wsi_common_display.c b/src/vulkan/wsi/wsi_common_dis
     mtx_destroy(&chain->present_id_mutex);
     u_cnd_monotonic_destroy(&chain->present_id_cond);
  
-@@ -1966,6 +2315,11 @@
+@@ -1966,6 +2326,20 @@
              return result;
           }
  
 +         /* A panel mounted rotated: turn the CRTC's primary plane first,
-+          * so the mode set scans out the image turned (LightMoss).
++          * so the mode set scans out the image turned (LightMoss). If the
++          * plane refused, the display's sides are no longer swapped and
++          * this swapchain's images do not fit its mode: out of date, so
++          * the application makes a new swapchain of the size the surface
++          * now reports.
 +          */
-+         wsi_display_turn_panel(wsi, connector);
++         if (!wsi_display_turn_panel(wsi, connector)) {
++            connector->active = false;
++            image->state = WSI_IMAGE_IDLE;
++            wsi_display_surface_error(chain, VK_ERROR_OUT_OF_DATE_KHR);
++            return VK_ERROR_OUT_OF_DATE_KHR;
++         }
 +
           /* XXX allow setting of position */
           ret = drmModeSetCrtc(wsi->fd, connector->crtc_id,
                                image->fb_id, 0, 0,
-@@ -2418,6 +2772,8 @@
+@@ -2418,6 +2792,8 @@
     if (wsi->fd >= 0) {
        wsi_display_stop_wait_thread(wsi);
  
