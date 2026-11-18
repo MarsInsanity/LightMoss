@@ -127,6 +127,14 @@ set_default() {
 	sync
 }
 
+# A partition's GPT unique GUID (blkid, or else its low-level probe of the
+# partition table itself).
+partuuid() {
+	_u="$(blkid -o value -s PARTUUID "$1" 2>/dev/null)" || true
+	[ -n "$_u" ] || _u="$(blkid -p -o value -s PART_ENTRY_UUID "$1" 2>/dev/null)" || true
+	echo "$_u"
+}
+
 # Whether an entry is usable for system copy $2 on $3: its kernel, initrd and
 # device tree are on LMBOOT, and it boots the right partition and slot.
 entry_ok() {
@@ -180,7 +188,7 @@ keep() {
 
 # root's and spruce's (uid 0, same password) password hashes, when changed.
 keep_passwords() {
-	[ -f /etc/shadow ] && [ -f "$mnt/etc/shadow" ] && [ ! -L "$mnt/etc/shadow" ] || return 0
+	[ -f /etc/shadow ] && [ -f "$mnt/etc/shadow" ] && [ ! -L "$mnt/etc/shadow" ] && inside /etc/shadow || return 0
 	for _u in root spruce; do
 		_line="$(grep "^$_u:" /etc/shadow | head -n 1)" || continue
 		grep -q "^$_u:" "$mnt/etc/shadow" || continue
@@ -238,9 +246,9 @@ for f in "$E"/lightmoss-"$slot"+*.conf; do
 	echo "System copy $slot kept (${f##*/})"
 done
 if [ ! -e "$E/lightmoss-$slot.conf" ]; then
-	sh /usr/libexec/lightmoss/boot-entry "$slot" "$(blkid -o value -s PARTUUID "$running")" \
+	sh /usr/libexec/lightmoss/boot-entry "$slot" "$(partuuid "$running")" \
 		"$(osr LIGHTMOSS_VERSION /etc/os-release)" > "$tmp/own"
-	entry_ok "$tmp/own" "$slot" "$(blkid -o value -s PARTUUID "$running")" ||
+	entry_ok "$tmp/own" "$slot" "$(partuuid "$running")" ||
 		die "system copy $slot has no boot entry to come back to (and no boot files on LMBOOT for one): not updating"
 	cp "$tmp/own" "$E/lightmoss-$slot.conf.new"
 	mv -f "$E/lightmoss-$slot.conf.new" "$E/lightmoss-$slot.conf"
@@ -312,8 +320,10 @@ while IFS= read -r p; do
 	keep "$p"
 done < "$tmp/keep"
 keep_passwords
-mkdir -p "$mnt/var/lib/lightmoss"
-touch "$mnt/var/lib/lightmoss/firstboot.done"
+if inside /var/lib/lightmoss/firstboot.done; then
+	mkdir -p "$mnt/var/lib/lightmoss"
+	touch "$mnt/var/lib/lightmoss/firstboot.done"
+fi
 
 step="copying the boot files to LMBOOT"
 echo "Setting up the boot entry..."
@@ -322,19 +332,19 @@ cp -r "$mnt"/usr/share/lightmoss/boot/* "/boot/lightmoss-$new/" ||
 	die "could not copy the boot files to LMBOOT ($(df -k /boot | awk 'END { print $4 }') KB free)"
 
 step="writing the boot entry"
-partuuid="$(blkid -o value -s PARTUUID "$target")"
-[ -n "$partuuid" ] || die "$target has no PARTUUID"
+pu="$(partuuid "$target")"
+[ -n "$pu" ] || die "$target has no PARTUUID"
 # The image's own boot-entry; this system's only if the image has none or
 # its entry would not boot (so an image too old for this check still goes).
 be="$mnt/usr/libexec/lightmoss/boot-entry"
 from="the new system's boot-entry"
-if [ ! -f "$be" ] || [ -L "$be" ] || ! sh "$be" "$new" "$partuuid" "$version" > "$tmp/entry" 2>/dev/null ||
-	! entry_ok "$tmp/entry" "$new" "$partuuid"; then
+if [ ! -f "$be" ] || [ -L "$be" ] || ! sh "$be" "$new" "$pu" "$version" > "$tmp/entry" 2>/dev/null ||
+	! entry_ok "$tmp/entry" "$new" "$pu"; then
 	[ -f "$be" ] && echo "(the new system's boot-entry gave no usable entry; using this system's)"
 	be=/usr/libexec/lightmoss/boot-entry
 	from="this system's boot-entry"
-	sh "$be" "$new" "$partuuid" "$version" > "$tmp/entry"
-	entry_ok "$tmp/entry" "$new" "$partuuid" || die "no usable boot entry for system copy $new: not installed"
+	sh "$be" "$new" "$pu" "$version" > "$tmp/entry"
+	entry_ok "$tmp/entry" "$new" "$pu" || die "no usable boot entry for system copy $new: not installed"
 fi
 echo "Boot entry lightmoss-$new+3.conf ($from):"
 sed 's/^/  /' "$tmp/entry"

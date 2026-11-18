@@ -30,6 +30,7 @@ MARK="${LM_BLESS_MARK:-/tmp/spruce_boot_jobs_started}"
 AFTER_FIRST_FRAME=/mnt/SDCARD/spruce/scripts/boot/after_first_frame.sh
 WAIT="${LM_BLESS_WAIT:-600}"   # seconds spruce has to come up on a trial
 STEP="${LM_BLESS_STEP:-2}"
+STABLE="${LM_BLESS_STABLE:-30}" # seconds a restarted runtime.sh must run
 
 log() { echo "lightmoss-bless: $*"; }
 
@@ -70,7 +71,7 @@ if [ -n "$trial" ]; then
 		# spruce without boot jobs: runtime.sh running for a minute.)
 		if [ "$state" = active ] &&
 		   { [ -d "$MARK" ] || { [ ! -e "$AFTER_FIRST_FRAME" ] && [ $(( same * STEP )) -ge 60 ]; }; } &&
-		   { [ "$restarts" = 0 ] || [ $(( same * STEP )) -ge 30 ]; }; then
+		   { [ "$restarts" = 0 ] || [ $(( same * STEP )) -ge "$STABLE" ]; }; then
 			break
 		fi
 		why=""
