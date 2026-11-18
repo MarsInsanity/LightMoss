@@ -19,6 +19,18 @@ MESA3D_VULKAN_DRIVERS-y += freedreno
 ifeq ($(BR2_PACKAGE_SDL2),y)
 SDL2_CONF_OPTS += --enable-video-vulkan
 endif
+
+# Desktop OpenGL through libglvnd (the Mini V2's builds, as above): keep
+# glvnd's GL/gl.h, GL/glext.h and GL/glcorearb.h in staging for programs
+# built against libOpenGL.so.0 (pkg-config opengl). mesa3d.mk removes
+# $(STAGING_DIR)/usr/include/GL/ after installing Mesa whenever it builds
+# no GLX; with glvnd, installed first as Mesa's dependency, those are
+# glvnd's, and Mesa installs no GL headers of its own. Hooks are expanded
+# when they run, after this file.
+ifeq ($(BR2_PACKAGE_LIBGLVND),y)
+MESA3D_POST_INSTALL_STAGING_HOOKS := \
+	$(filter-out MESA3D_REMOVE_OPENGL_HEADERS,$(MESA3D_POST_INSTALL_STAGING_HOOKS))
+endif
 endif
 
 # The lib32 build: its libraries live in /usr/lib/arm-linux-gnueabihf on the
