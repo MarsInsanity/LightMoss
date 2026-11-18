@@ -14,7 +14,7 @@ BR2_ARM_FPU_NEON_FP_ARMV8=y
 BR2_BACKUP_SITE="https://sources.buildroot.net"
 BR2_CCACHE=y
 BR2_OPTIMIZE_2=y
-# SDL2's and SDL3's panel rotation, as in the 64-bit build.
+# SDL2's, SDL3's and Mesa's Vulkan panel rotation, as in the 64-bit build.
 BR2_GLOBAL_PATCH_DIR="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/rpminiv2/patches"
 
 # --- Toolchain -------------------------------------------------------------------
