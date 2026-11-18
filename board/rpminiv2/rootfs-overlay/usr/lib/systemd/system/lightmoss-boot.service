@@ -9,7 +9,10 @@ Conflicts=umount.target
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/libexec/lightmoss/mount-boot
-ExecStop=/bin/umount /boot
+# No ExecStop: systemd's boot.mount unmounts /boot at shutdown (before
+# umount.target, after every service). An umount here ran beside it, and at
+# every power-off one of the two failed: this unit ("not mounted") or
+# boot.mount ("target is busy" while this one was at it).
 
 [Install]
 WantedBy=local-fs.target
