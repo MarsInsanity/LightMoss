@@ -1,62 +1,221 @@
 #!/bin/sh
 # Update LightMoss on the internal storage from a release image, while it
-# runs: lightmoss-update [-y] lightmoss-rpminiv2-<version>.img.xz
+# runs:
+#   lightmoss-update [-y] lightmoss-rpminiv2-<version>.img.xz
+#   lightmoss-update --check lightmoss-rpminiv2-<version>.img.xz
+# (--check only reads the image the way an update does and says where its
+# system is; the CI runs it on every image before releasing it.)
 #
 # The image's system goes on the system copy that is not running (LMSYS2
 # when this is LMSYS1, and back), which is then made OpenABL's default with
-# three tries: the next start boots it. Once spruce starts on it,
-# lightmoss-bless keeps it. If it never gets that far, OpenABL boots this
-# copy again after three tries, and lightmoss-bless puts it back as the
-# default and leaves /boot/lightmoss-update-failed for the update app.
+# three tries: the next start boots it. Once spruce is up on it,
+# lightmoss-bless keeps it. If it never gets that far (a panic or a missing
+# root restarts the device by itself, see boot-entry, and lightmoss-bless
+# restarts it when spruce does not come up), OpenABL boots this copy again
+# after three tries, and lightmoss-bless puts it back as the default and
+# leaves /boot/lightmoss-update-failed for the update app.
 #
-# The running copy is never written, so a power cut or a bad image at any
-# point leaves the device starting as before. Kept from the running copy: the
-# machine ID and the SSH host keys (the flags on LMBOOT stay where they are).
+# The running copy is never written. The copy about to be written is first
+# taken out of OpenABL's entries, and the new one becomes the default only
+# once it is complete and checked, so a power cut or a bad image at any point
+# leaves the device starting as before.
+#
+# The new copy's boot entry is written by the image's own boot-entry, so the
+# kernel options of a release come with it.
+#
+# Carried over from the running copy: what /usr/share/lightmoss/update-keep
+# lists (this system's list and the image's) and what you list in
+# /etc/lightmoss/update-keep (one path under /etc, /var/lib or /root per
+# line): the machine ID, the SSH host keys and authorized keys, the Wi-Fi
+# networks, Bluetooth pairings and so on; also the root/spruce password. The
+# flags on LMBOOT stay where they are.
 set -eu
-. /usr/libexec/lightmoss/lib.sh
+# The system's own tools, whatever spruce (the update app) put first.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+unset LD_LIBRARY_PATH LD_PRELOAD 2>/dev/null || true
 
-die() { echo "lightmoss-update: $*" >&2; exit 1; }
+step="starting"
+said=0
+tmp=""
+mnt=""
+die() { echo "lightmoss-update: $*" >&2; said=1; exit 1; }
+
+# The EXIT trap must not fail itself (set -e applies in it), and it says
+# where a step that failed without a message of its own stopped.
+cleanup() {
+	rc=$?
+	set +e
+	if [ -n "$mnt" ]; then
+		mountpoint -q "$mnt" && umount "$mnt"
+		rmdir "$mnt" 2>/dev/null
+	fi
+	[ -n "$tmp" ] && rm -rf "$tmp"
+	if [ "$rc" != 0 ] && [ "$said" = 0 ]; then
+		echo "lightmoss-update: failed while $step (exit $rc): not installed" >&2
+	fi
+	exit "$rc"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
+
+# One key of an os-release file.
+osr() { sed -n "s/^$1=\"\{0,1\}\([^\"]*\)\"\{0,1\}\$/\1/p" "$2" 2>/dev/null | head -n 1; }
+
+# The image's system: the LMSYS partition of its GPT (512-byte sectors, as
+# genimage writes it). Sets $skip and $bytes, the system's offset and size.
+inspect_image() {
+	step="checking the image"
+	echo "Checking $1..."
+	xz -t "$1" 2>/dev/null || die "the image is damaged (xz check failed)"
+	hdr="$tmp/hdr"
+	xz -dc "$1" 2>/dev/null | head -c 65536 > "$hdr" || true
+	[ "$(dd if="$hdr" bs=1 skip=512 count=8 2>/dev/null)" = "EFI PART" ] ||
+		die "the image has no GPT: not a LightMoss image for this device"
+	# The header's partition entry array: first LBA, count, entry size.
+	elba="$(od -An -tu8 -j 584 -N 8 "$hdr" | tr -d ' \n')"
+	count="$(od -An -tu4 -j 592 -N 4 "$hdr" | tr -d ' \n')"
+	esize="$(od -An -tu4 -j 596 -N 4 "$hdr" | tr -d ' \n')"
+	[ -n "$elba" ] && [ -n "$count" ] && [ -n "$esize" ] && [ "$esize" -ge 128 ] &&
+		[ $(( elba * 512 + count * esize )) -le 65536 ] ||
+		die "the image's GPT is not laid out as LightMoss's images are"
+	first=""; last=""
+	i=0
+	while [ "$i" -lt "$count" ]; do
+		off=$(( elba * 512 + i * esize ))
+		name="$(dd if="$hdr" bs=1 skip=$(( off + 56 )) count=72 2>/dev/null | tr -d '\000')"
+		if [ "$name" = LMSYS ]; then
+			first="$(od -An -tu8 -j $(( off + 32 )) -N 8 "$hdr" | tr -d ' \n')"
+			last="$(od -An -tu8 -j $(( off + 40 )) -N 8 "$hdr" | tr -d ' \n')"
+			break
+		fi
+		i=$((i + 1))
+	done
+	[ -n "$first" ] && [ -n "$last" ] && [ "$last" -ge "$first" ] ||
+		die "the image has no LMSYS partition: not a LightMoss image for this device"
+	skip=$(( first * 512 ))
+	bytes=$(( (last - first + 1) * 512 ))
+}
+
+if [ "${1:-}" = --check ]; then
+	[ -n "${2:-}" ] && [ -f "$2" ] || die "usage: lightmoss-update --check lightmoss-rpminiv2-<version>.img.xz"
+	tmp="$(mktemp -d)"
+	inspect_image "$2"
+	echo "LMSYS: $bytes bytes at offset $skip"
+	exit 0
+fi
+
+. /usr/libexec/lightmoss/lib.sh
 
 yes=0
 [ "${1:-}" = -y ] && { yes=1; shift; }
 img="${1:-}"
 [ -n "$img" ] && [ -f "$img" ] || die "usage: lightmoss-update [-y] lightmoss-rpminiv2-<version>.img.xz"
 
+# OpenABL's default, written to a new file and renamed (FAT has no atomic
+# replace, but the rename is as close as it gets), with a sync on each side.
+# Other lines of loader.conf (a timeout set by hand) stay.
+set_default() {
+	_conf=/boot/loader/loader.conf
+	[ "$(sed -n 's/^default[[:space:]]*//p' "$_conf" 2>/dev/null | tail -n 1)" = "lightmoss-$1.conf" ] && return 0
+	{
+		echo "default lightmoss-$1.conf"
+		if [ -f "$_conf" ]; then sed '/^[[:space:]]*default[[:space:]]/d' "$_conf"; else echo "timeout 0"; fi
+	} > "$_conf.new"
+	sync
+	mv -f "$_conf.new" "$_conf"
+	sync
+}
+
+# Whether an entry is usable for system copy $2 on $3: its kernel, initrd and
+# device tree are on LMBOOT, and it boots the right partition and slot.
+entry_ok() {
+	grep -q "^options.*root=PARTUUID=$3 " "$1" || return 1
+	grep -q "^options.*lightmoss\.slot=$2\( \|\$\)" "$1" || return 1
+	for _k in linux initrd devicetree; do
+		_f="$(sed -n "s/^${_k}[[:space:]][[:space:]]*//p" "$1" | head -n 1)"
+		[ -n "$_f" ] || { [ "$_k" = linux ] && return 1; continue; }
+		[ -s "/boot/${_f#/}" ] || { echo "  $_k $_f is not on LMBOOT" >&2; return 1; }
+	done
+}
+
+# Is every directory on the way to $1 in the new copy a real directory, not a
+# link that could lead out of it?
+inside() {
+	_p="$mnt"
+	_rest="${1#/}"
+	while :; do
+		case "$_rest" in */*) ;; *) return 0 ;; esac
+		_p="$_p/${_rest%%/*}"
+		_rest="${_rest#*/}"
+		[ -L "$_p" ] && return 1
+		[ -e "$_p" ] || return 0
+		[ -d "$_p" ] || return 1
+	done
+}
+
+# One file or folder of this system into the new copy, replacing the image's.
+keep() {
+	_k="$1"
+	while :; do case "$_k" in */) _k="${_k%/}" ;; *) break ;; esac; done
+	case "$_k" in
+		/etc/?*|/var/lib/?*|/root/?*) ;;
+		*) echo "  not kept (only paths under /etc, /var/lib and /root are): $_k"; return 0 ;;
+	esac
+	case "$_k/" in */../*|*/./*|*//*) echo "  not kept (not a plain path): $_k"; return 0 ;; esac
+	[ -e "$_k" ] || [ -L "$_k" ] || return 0
+	case "$_k" in
+		/var/lib/systemd/timesync/clock)
+			# Its date is the clock's floor at the next start: only one
+			# set from the network this start is worth taking along.
+			[ -e /run/systemd/timesync/synchronized ] ||
+				{ echo "  not kept (the clock is not set from the network): $_k"; return 0; } ;;
+	esac
+	inside "$_k" || { echo "  not kept (a link on its way in the new system): $_k"; return 0; }
+	rm -rf "$mnt$_k"
+	mkdir -p "$mnt${_k%/*}"
+	cp -a "$_k" "$mnt$_k"
+	echo "  kept $_k"
+}
+
+# root's and spruce's (uid 0, same password) password hashes, when changed.
+keep_passwords() {
+	[ -f /etc/shadow ] && [ -f "$mnt/etc/shadow" ] && [ ! -L "$mnt/etc/shadow" ] || return 0
+	for _u in root spruce; do
+		_line="$(grep "^$_u:" /etc/shadow | head -n 1)" || continue
+		grep -q "^$_u:" "$mnt/etc/shadow" || continue
+		[ "$(grep "^$_u:" "$mnt/etc/shadow" | head -n 1)" = "$_line" ] && continue
+		LINE="$_line" awk -F: -v u="$_u" '$1 == u { print ENVIRON["LINE"]; next } { print }' \
+			"$mnt/etc/shadow" > "$tmp/shadow"
+		# Into the file that is there, so it keeps its owner and mode.
+		cat "$tmp/shadow" > "$mnt/etc/shadow"
+		echo "  kept $_u's password"
+	done
+}
+
+step="finding the system copies"
 slot="$(lm_slot)"
 case "$slot" in
 	1) new=2 ;;
 	2) new=1 ;;
-	*) die "this system does not run from the internal storage (system copy $slot): install it first (lightmoss-install-internal)" ;;
+	*) die "this LightMoss runs from the card (system copy ${slot:-unknown}). Updates over the air are for LightMoss on the internal storage, which has two system copies: install it there first (lightmoss-install-internal)" ;;
 esac
-disk="$(lm_root_disk)"
-target="$(lm_part_named "$disk" "LMSYS$new")" || die "no LMSYS$new partition"
+[ "$(id -u)" = 0 ] || die "this needs root"
+exec 9>/run/lightmoss-update.lock
+flock -n 9 || die "another update is running"
+board="$(osr LIGHTMOSS_BOARD /etc/os-release)"; board="${board:-rpminiv2}"
+disk="$(lm_root_disk)" || die "cannot tell which disk this system runs from"
+running="$(lm_part_named "$disk" "LMSYS$slot")" || die "no LMSYS$slot partition on $disk"
+target="$(lm_part_named "$disk" "LMSYS$new")" || die "no LMSYS$new partition on $disk"
+[ "$(cat "/sys/class/block/${running#/dev/}/dev")" = "$(mountpoint -d /)" ] ||
+	die "this system does not run from LMSYS$slot, as its boot entry says: not updating"
+grep -q "^$target " /proc/mounts && die "$target is mounted"
 mountpoint -q /boot || die "LMBOOT is not mounted at /boot"
-grep -q "/dev/${target#/dev/} " /proc/mounts && die "$target is mounted"
+{ : > /boot/.lightmoss-update-test && rm -f /boot/.lightmoss-update-test; } 2>/dev/null ||
+	die "LMBOOT (/boot) cannot be written"
 
-echo "Checking $img..."
-xz -t "$img" 2>/dev/null || die "the image is damaged (xz check failed)"
-
-# The image's GPT (512-byte sectors, as genimage writes it): the LMSYS
-# partition's first and last sector, from its 128-byte entries at LBA 2.
-hdr="$(mktemp)"
-trap 'rm -f "$hdr" "$hdr.fifo" "$hdr.sum" "$hdr.dd"' EXIT
-xz -dc "$img" 2>/dev/null | head -c 65536 > "$hdr" || true
-[ "$(dd if="$hdr" bs=1 skip=512 count=8 2>/dev/null)" = "EFI PART" ] || die "the image has no GPT"
-first=""; last=""
-i=0
-while [ "$i" -lt 128 ]; do
-	off=$(( 1024 + i * 128 ))
-	name="$(dd if="$hdr" bs=1 skip=$(( off + 56 )) count=72 2>/dev/null | tr -d '\000')"
-	if [ "$name" = LMSYS ]; then
-		first="$(od -An -tu8 -j $(( off + 32 )) -N 8 "$hdr" | tr -d ' ')"
-		last="$(od -An -tu8 -j $(( off + 40 )) -N 8 "$hdr" | tr -d ' ')"
-		break
-	fi
-	i=$((i + 1))
-done
-[ -n "$first" ] && [ -n "$last" ] || die "the image has no LMSYS partition: not a LightMoss image for this device"
-skip=$(( first * 512 ))
-bytes=$(( (last - first + 1) * 512 ))
+tmp="$(mktemp -d)"
+inspect_image "$img"
 have=$(( $(cat "/sys/class/block/${target#/dev/}/size") * 512 ))
 [ "$bytes" -le "$have" ] || die "the image's system ($bytes bytes) does not fit LMSYS$new ($have bytes)"
 
@@ -68,54 +227,131 @@ if [ "$yes" = 0 ]; then
 	[ "$answer" = yes ] || die "cancelled"
 fi
 
-echo "Writing system copy $new..."
-# One pass: the system goes to the partition while its checksum is taken.
-mkfifo "$hdr.fifo"
-sha256sum < "$hdr.fifo" | cut -d' ' -f1 > "$hdr.sum" &
+E=/boot/loader/entries
+step="taking system copy $new out of the boot entries"
+mkdir -p "$E"
+# This copy runs (spruce runs the update app on it, or someone is at its
+# shell): it keeps its entry, the one to come back to if the new copy fails.
+for f in "$E"/lightmoss-"$slot"+*.conf; do
+	[ -e "$f" ] || continue
+	mv -f "$f" "$E/lightmoss-$slot.conf"
+	echo "System copy $slot kept (${f##*/})"
+done
+if [ ! -e "$E/lightmoss-$slot.conf" ]; then
+	sh /usr/libexec/lightmoss/boot-entry "$slot" "$(blkid -o value -s PARTUUID "$running")" \
+		"$(osr LIGHTMOSS_VERSION /etc/os-release)" > "$tmp/own"
+	entry_ok "$tmp/own" "$slot" "$(blkid -o value -s PARTUUID "$running")" ||
+		die "system copy $slot has no boot entry to come back to (and no boot files on LMBOOT for one): not updating"
+	cp "$tmp/own" "$E/lightmoss-$slot.conf.new"
+	mv -f "$E/lightmoss-$slot.conf.new" "$E/lightmoss-$slot.conf"
+	echo "System copy $slot: boot entry written again"
+fi
+# The copy about to be written is no one's entry, and not the default.
+rm -f "$E/lightmoss-$new.conf" "$E"/lightmoss-"$new"+*.conf "$E/lightmoss-$new+3.conf.new"
+set_default "$slot"
+rm -f /boot/lightmoss-update-pending
+rm -rf "/boot/lightmoss-$new"
+sync
+
+step="writing system copy $new"
+echo "Writing system copy $new ($target)..."
+# One pass: the system goes to the partition while its checksum is taken and
+# its bytes are counted (busybox dd says nothing about bytes).
+mkfifo "$tmp/sum.fifo" "$tmp/len.fifo"
+sha256sum < "$tmp/sum.fifo" > "$tmp/sum" &
 sumpid=$!
-xz -dc "$img" | tail -c +$(( skip + 1 )) | head -c "$bytes" | tee "$hdr.fifo" | dd of="$target" bs=1M conv=fsync 2>"$hdr.dd" ||
-	die "writing $target failed"
-wait "$sumpid"
-want="$(cat "$hdr.sum")"
-wrote="$(sed -n 's/^\([0-9][0-9]*\) bytes.*/\1/p' "$hdr.dd" | tail -n 1)"
-[ "$wrote" = "$bytes" ] || die "only ${wrote:-0} of the system's $bytes bytes were written: not installed"
+wc -c < "$tmp/len.fifo" > "$tmp/len" &
+lenpid=$!
+ok=1
+xz -dc "$img" | tail -c +$(( skip + 1 )) | head -c "$bytes" | tee "$tmp/sum.fifo" "$tmp/len.fifo" |
+	dd of="$target" bs=1M conv=fsync 2>"$tmp/dd" || ok=0
+wait "$sumpid" || true
+wait "$lenpid" || true
+[ "$ok" = 1 ] || die "writing $target failed: $(tail -n 1 "$tmp/dd" 2>/dev/null)"
+want="$(cut -d' ' -f1 < "$tmp/sum")"
+wrote="$(tr -d ' \n' < "$tmp/len")"
+[ "$wrote" = "$bytes" ] || die "only ${wrote:-0} of the system's $bytes bytes came out of the image: not installed"
+
+step="checking system copy $new"
 echo "Checking what was written..."
+sync
 echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
 got="$(head -c "$bytes" "$target" | sha256sum | cut -d' ' -f1)"
 [ -n "$want" ] && [ "$got" = "$want" ] || die "system copy $new does not read back as written: not installed"
+rc=0
+e2fsck -fy "$target" > "$tmp/fsck" 2>&1 || rc=$?
+[ "$rc" -lt 4 ] || { cat "$tmp/fsck" >&2; die "the new system's filesystem has errors e2fsck cannot repair (e2fsck exit $rc): not installed"; }
+resize2fs "$target" > /dev/null 2>&1 || echo "(the new system's filesystem keeps the image's size)"
 
-e2fsck -fy "$target" >/dev/null 2>&1 || true
-resize2fs "$target" >/dev/null 2>&1 || true
-
+step="mounting system copy $new"
 mnt="$(mktemp -d)"
-trap 'umount "$mnt" 2>/dev/null; rmdir "$mnt" 2>/dev/null; rm -f "$hdr" "$hdr.fifo" "$hdr.sum" "$hdr.dd"' EXIT
-mount "$target" "$mnt" || die "cannot mount $target"
-version="$(sed -n 's/^LIGHTMOSS_VERSION="\(.*\)"/\1/p' "$mnt/usr/lib/os-release" 2>/dev/null)"
-[ -d "$mnt/usr/share/lightmoss/boot" ] || die "the new system has no boot files"
-# This system's identity, in the new copy.
-cp -a /etc/machine-id "$mnt/etc/machine-id" 2>/dev/null || true
-if [ -d /etc/dropbear ]; then
-	rm -rf "$mnt/etc/dropbear"
-	cp -a /etc/dropbear "$mnt/etc/dropbear"
-fi
+mount -t ext4 "$target" "$mnt" || die "cannot mount $target"
+step="checking the new system"
+nosr="$mnt/usr/lib/os-release"
+[ -f "$nosr" ] && [ ! -L "$nosr" ] || die "the image has no usr/lib/os-release: not a LightMoss system"
+nboard="$(osr LIGHTMOSS_BOARD "$nosr")"
+[ "$nboard" = "$board" ] || die "the image is LightMoss for ${nboard:-another device}, and this is $board: not installed"
+version="$(osr LIGHTMOSS_VERSION "$nosr")"; version="${version:-unknown}"
+[ -d "$mnt/usr/share/lightmoss/boot" ] && [ ! -L "$mnt/usr/share/lightmoss/boot" ] &&
+	ls "$mnt/usr/share/lightmoss/boot/"* > /dev/null 2>&1 || die "the new system has no boot files"
+echo "The image is LightMoss $version for $nboard."
+
+step="carrying this system's settings over"
+echo "Carrying this system's settings over:"
+{
+	if [ -f /usr/share/lightmoss/update-keep ]; then
+		cat /usr/share/lightmoss/update-keep
+	else
+		printf '%s\n' /etc/machine-id /etc/dropbear
+	fi
+	for l in "$mnt/usr/share/lightmoss/update-keep" /etc/lightmoss/update-keep; do
+		[ -f "$l" ] && [ ! -L "$l" ] && cat "$l"
+	done
+} | sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' | sort -u > "$tmp/keep"
+while IFS= read -r p; do
+	keep "$p"
+done < "$tmp/keep"
+keep_passwords
 mkdir -p "$mnt/var/lib/lightmoss"
 touch "$mnt/var/lib/lightmoss/firstboot.done"
 
+step="copying the boot files to LMBOOT"
 echo "Setting up the boot entry..."
-rm -rf "/boot/lightmoss-$new"
 mkdir -p "/boot/lightmoss-$new"
-cp "$mnt"/usr/share/lightmoss/boot/* "/boot/lightmoss-$new/"
-umount "$mnt"
+cp -r "$mnt"/usr/share/lightmoss/boot/* "/boot/lightmoss-$new/" ||
+	die "could not copy the boot files to LMBOOT ($(df -k /boot | awk 'END { print $4 }') KB free)"
+
+step="writing the boot entry"
 partuuid="$(blkid -o value -s PARTUUID "$target")"
 [ -n "$partuuid" ] || die "$target has no PARTUUID"
-mkdir -p /boot/loader/entries
-rm -f /boot/loader/entries/lightmoss-"$new".conf /boot/loader/entries/lightmoss-"$new"+*.conf
+# The image's own boot-entry; this system's only if the image has none or
+# its entry would not boot (so an image too old for this check still goes).
+be="$mnt/usr/libexec/lightmoss/boot-entry"
+from="the new system's boot-entry"
+if [ ! -f "$be" ] || [ -L "$be" ] || ! sh "$be" "$new" "$partuuid" "$version" > "$tmp/entry" 2>/dev/null ||
+	! entry_ok "$tmp/entry" "$new" "$partuuid"; then
+	[ -f "$be" ] && echo "(the new system's boot-entry gave no usable entry; using this system's)"
+	be=/usr/libexec/lightmoss/boot-entry
+	from="this system's boot-entry"
+	sh "$be" "$new" "$partuuid" "$version" > "$tmp/entry"
+	entry_ok "$tmp/entry" "$new" "$partuuid" || die "no usable boot entry for system copy $new: not installed"
+fi
+echo "Boot entry lightmoss-$new+3.conf ($from):"
+sed 's/^/  /' "$tmp/entry"
 # Three tries: OpenABL counts them down; lightmoss-bless keeps the entry once
-# spruce has started on it.
-/usr/libexec/lightmoss/boot-entry "$new" "$partuuid" "$version" > "/boot/loader/entries/lightmoss-$new+3.conf"
-printf 'default lightmoss-%s.conf\ntimeout 0\n' "$new" > /boot/loader/loader.conf.new
-mv -f /boot/loader/loader.conf.new /boot/loader/loader.conf
+# spruce is up on it.
+cp "$tmp/entry" "$E/lightmoss-$new+3.conf.new"
+mv -f "$E/lightmoss-$new+3.conf.new" "$E/lightmoss-$new+3.conf"
 echo "$version" > /boot/lightmoss-update-pending
 rm -f /boot/lightmoss-update-failed
+
+step="finishing system copy $new"
+umount "$mnt"
+rmdir "$mnt" 2>/dev/null || true
+mnt=""
 sync
+
+step="making system copy $new the default"
+set_default "$new"
+step="done"
 echo "Done: LightMoss $version is on system copy $new and starts next time."

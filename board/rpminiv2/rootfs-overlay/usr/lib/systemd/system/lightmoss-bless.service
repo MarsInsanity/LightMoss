@@ -1,12 +1,15 @@
 [Unit]
-Description=Keep this system copy's boot entry once spruce has started
+Description=Keep this system copy's boot entry once spruce is up
+# The internal storage's system copies only; a card has nothing to keep.
+ConditionKernelCommandLine=|lightmoss.slot=1
+ConditionKernelCommandLine=|lightmoss.slot=2
 After=spruce-launch.service lightmoss-boot.service
 Requires=lightmoss-boot.service
 
 [Service]
-Type=oneshot
-# spruce's runtime.sh has been started; give it a moment to show it runs.
-ExecStartPre=/bin/sleep 20
+# Started, not waited for: on a trial start it waits for spruce itself (up to
+# 10 minutes), and the boot (multi-user.target) does not wait for that.
+Type=exec
 ExecStart=/usr/libexec/lightmoss/bless
 
 [Install]
