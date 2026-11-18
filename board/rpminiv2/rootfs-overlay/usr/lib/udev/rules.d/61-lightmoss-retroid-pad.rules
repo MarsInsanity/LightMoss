@@ -1,0 +1,8 @@
+# The Retroid pad (ROCKNIX's retroid serdev driver) reports BTN_BACK (0x116)
+# besides its gamepad buttons, and that code is in the mouse button range
+# (BTN_MOUSE..BTN_JOYSTICK): input_id (60-input-id.rules) then takes a device
+# with ABS_X/ABS_Y and a mouse button for an absolute mouse and never tags it
+# ID_INPUT_JOYSTICK. RetroArch's udev joypad driver and SDL look for joysticks
+# only; under spruce RetroArch listed the pad as "Mouse/Touch" and no control
+# worked in a game.
+ACTION!="remove", SUBSYSTEM=="input", ATTRS{name}=="Retroid Pocket Gamepad", ENV{ID_INPUT_MOUSE}="", ENV{ID_INPUT_JOYSTICK}="1"
