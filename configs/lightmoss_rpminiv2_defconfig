@@ -12,7 +12,7 @@ BR2_BACKUP_SITE="https://sources.buildroot.net"
 BR2_CCACHE=y
 BR2_OPTIMIZE_2=y
 # Hashes for the kernel tarball and patches for buildroot's own packages
-# and this tree's (SDL2's and SDL3's panel rotation).
+# and this tree's (SDL2's, SDL3's and Mesa's Vulkan panel rotation).
 BR2_GLOBAL_PATCH_DIR="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/rpminiv2/patches"
 
 # --- Toolchain: glibc (PortMaster ports are glibc binaries) --------------------
@@ -77,12 +77,28 @@ BR2_PACKAGE_HOST_MTOOLS=y
 # them in an initramfs (post-image.sh).
 BR2_PACKAGE_LIGHTMOSS_FIRMWARE_SM8250=y
 BR2_PACKAGE_WIRELESS_REGDB=y
-# Adreno 650: Mesa's freedreno (OpenGL ES, EGL, GBM).
+# Adreno 650: Mesa's freedreno (OpenGL ES, EGL, GBM), and desktop OpenGL
+# through libglvnd: libOpenGL.so.0 (no libGL.so.1, which is GLX and needs
+# X11), with libEGL.so.1, libGLESv1_CM.so.1 and libGLESv2.so.2 from glvnd
+# and Mesa as their vendor (libEGL_mesa.so.0, by
+# /usr/share/glvnd/egl_vendor.d/50_mesa.json). glvnd's GLES libraries
+# export the same symbols as Mesa's own did, its libEGL all but Mesa's three
+# MesaGLInteropEGL* (OpenCL interop). SDL loads libOpenGL.so.0 for a program
+# that asks for a desktop GL context (it used to fall back to OpenGL ES 2.0);
+# one that does not still gets OpenGL ES, as before.
 BR2_PACKAGE_MESA3D=y
 BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_FREEDRENO=y
 BR2_PACKAGE_MESA3D_GBM=y
 BR2_PACKAGE_MESA3D_OPENGL_EGL=y
 BR2_PACKAGE_MESA3D_OPENGL_ES=y
+BR2_PACKAGE_LIBGLVND=y
+# Vulkan: Turnip (Mesa's freedreno Vulkan driver, this tree's option, see
+# Config.in) and the Khronos loader, libvulkan.so.1. Programs present
+# through VK_KHR_display; the panel is turned by Mesa as SDL turns it
+# (board/rpminiv2/patches/mesa3d). vulkaninfo, to check it on the device.
+BR2_LIGHTMOSS_MESA3D_TURNIP=y
+BR2_PACKAGE_VULKAN_LOADER=y
+BR2_PACKAGE_VULKAN_TOOLS=y
 # The 32-bit (armhf) runtime, from configs/lightmoss_rpminiv2_lib32_defconfig.
 BR2_PACKAGE_LIGHTMOSS_LIB32=y
 BR2_PACKAGE_ALSA_LIB=y

@@ -47,4 +47,28 @@ define LIGHTMOSS_LIB32_INSTALL_TARGET_CMDS
 		$(TARGET_DIR)/usr/lib/ld-linux-armhf.so.3
 endef
 
+# Turnip's ICD manifest (the Mini V2): Mesa names it freedreno_icd.<cpu>.json
+# with the library in /usr/lib, and both builds' <cpu> is the same
+# (cortex-a76.cortex-a55), so the 32-bit one goes in under its own name and
+# points at the lib32 copy. Each loader skips the other's manifest by its
+# library_arch ("32" here, "64" in Mesa's 64-bit one).
+ifeq ($(BR2_LIGHTMOSS_MESA3D_TURNIP),y)
+LIGHTMOSS_LIB32_VULKAN_ICD = $(TARGET_DIR)/usr/share/vulkan/icd.d/freedreno_icd.armhf.json
+define LIGHTMOSS_LIB32_INSTALL_VULKAN_ICD
+	icd="$$(ls $(@D)/usr/share/vulkan/icd.d/freedreno_icd.*.json 2>/dev/null | head -n 1)"; \
+	if [ -z "$$icd" ]; then \
+		echo "lightmoss-lib32: no 32-bit Turnip ICD manifest in $(LM_LIB32_OUTPUT)"; \
+		exit 1; \
+	fi; \
+	mkdir -p $(dir $(LIGHTMOSS_LIB32_VULKAN_ICD)) && \
+	sed 's|"library_path": *"[^"]*/libvulkan_freedreno.so"|"library_path": "$(LIGHTMOSS_LIB32_LIBDIR)/libvulkan_freedreno.so"|' \
+		"$$icd" > $(LIGHTMOSS_LIB32_VULKAN_ICD) && \
+	grep -q '"library_path": "$(LIGHTMOSS_LIB32_LIBDIR)/libvulkan_freedreno.so"' \
+		$(LIGHTMOSS_LIB32_VULKAN_ICD) || { \
+		echo "lightmoss-lib32: $$icd: no library_path to point at $(LIGHTMOSS_LIB32_LIBDIR)"; \
+		exit 1; }
+endef
+LIGHTMOSS_LIB32_POST_INSTALL_TARGET_HOOKS += LIGHTMOSS_LIB32_INSTALL_VULKAN_ICD
+endif
+
 $(eval $(generic-package))

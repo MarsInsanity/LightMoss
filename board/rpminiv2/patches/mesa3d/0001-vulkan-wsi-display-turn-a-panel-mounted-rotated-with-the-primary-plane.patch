@@ -1,0 +1,578 @@
+From: LightMoss <noreply@github.com>
+Subject: [PATCH] vulkan/wsi/display: turn a panel mounted rotated with the primary plane
+
+The Mesa counterpart of LightMoss's SDL2 patch of the same name
+(board/rpminiv2/patches/sdl2), for programs that present through
+VK_KHR_display (RetroArch's khr_display context, SDL's KMS/DRM Vulkan
+windows).
+
+The Retroid Pocket Mini V2's AMOLED panel scans out portrait (1080x1240)
+and is mounted landscape; its device tree says so ("rotation = <90>"),
+which the kernel reports as the connector's "panel orientation" (Right
+Side Up). VK_KHR_display showed the display as the CRTC's 1080x1240 and
+every Vulkan program came out sideways.
+
+Where the CRTC's primary plane can rotate (with ROCKNIX's SDE rotator
+patches the SM8250's planes offer 90 and 270), turn it by the panel's
+orientation, as the kernel's fbdev emulation does for 0 and 180, and
+show programs the display with its sides swapped (1240x1080): the mode
+list, the display's resolution, the plane capabilities, the surface's
+current extent and present rectangle. Programs render into images of
+that size, which the plane scans out turned: the kernel's legacy
+drmModeSetCrtc() and drmModePageFlip(), which this WSI uses, swap the
+source size of a primary plane turned by 90 or 270 degrees.
+
+- The panel's rotation is decided once per connector, when it is first
+  enumerated: Left Side Up 90, Upside Down 180, Right Side Up 270, as
+  SDL's patch does, and only if the primary plane of the CRTC driving
+  the connector offers it.
+- The plane is the CRTC's own primary plane: the one bound to it, else
+  the CRTC's index among the primary planes (MSM's DPU lists every
+  plane as possible on every CRTC and gives CRTC i the i-th primary),
+  else the first usable one; looked up again for the CRTC the mode set
+  uses.
+- It is turned with drmModeObjectSetProperty() right before each
+  drmModeSetCrtc() (DRM master needed; without it nothing changes and
+  the WSI waits for its VT as before), and turned upright again when a
+  swapchain is destroyed or the display released once the CRTC shows
+  none of its images (removing them disabled the plane), so the next
+  program finds it as it was; the next present then sets the CRTC
+  again, turning the plane first. The kernel's fbdev restore resets it
+  too.
+- A plane that refuses (other than for want of DRM master) is set
+  upright (an earlier mode set may have turned it) and leaves the panel
+  unturned and its sides unswapped from then on. The swapchain made for
+  the swapped size no longer fits the mode: its present returns
+  VK_ERROR_OUT_OF_DATE_KHR without trying the mode set, and the
+  application's next swapchain, of the size the surface now reports,
+  is shown unturned (sideways). A refused 180 changes no sizes, so the
+  mode set goes ahead.
+
+MESA_KMS_PANEL_ROTATION=0 leaves the panel alone; 90, 180 or 270 turn
+it by that many degrees (counter-clockwise, as DRM counts). An SDL
+Vulkan window needs SDL and Mesa to agree: set SDL_KMSDRM_PANEL_ROTATION
+to the same value.
+
+On displays without a "panel orientation", or one that says Normal,
+nothing changes.
+---
+diff --git a/src/vulkan/wsi/wsi_common_display.c b/src/vulkan/wsi/wsi_common_display.c
+--- a/src/vulkan/wsi/wsi_common_display.c
++++ b/src/vulkan/wsi/wsi_common_display.c
+@@ -44,6 +44,7 @@
+ #include "util/cnd_monotonic.h"
+ #include "util/hash_table.h"
+ #include "util/list.h"
++#include "util/log.h"
+ #include "util/os_time.h"
+ #include "util/timespec.h"
+ 
+@@ -96,6 +97,19 @@
+ #ifdef VK_USE_PLATFORM_XLIB_XRANDR_EXT
+    xcb_randr_output_t           output;
+ #endif
++   /* Panel rotation (LightMoss): a panel mounted rotated is turned by its
++    * CRTC's primary plane. rot_value is the plane's DRM_MODE_ROTATE_* value,
++    * 0 when nothing is turned; rot_swap shows the modes with their sides
++    * swapped (90 and 270); rot_on is set while this instance has turned the
++    * plane.
++    */
++   bool                         rot_probed;
++   bool                         rot_swap;
++   bool                         rot_on;
++   uint64_t                     rot_value;
++   uint32_t                     rot_crtc_id;
++   uint32_t                     rot_plane_id;
++   uint32_t                     rot_prop_id;
+ } wsi_display_connector;
+ 
+ struct wsi_display {
+@@ -179,6 +193,21 @@
+ ICD_DEFINE_NONDISP_HANDLE_CASTS(wsi_display_mode, VkDisplayModeKHR)
+ ICD_DEFINE_NONDISP_HANDLE_CASTS(wsi_display_connector, VkDisplayKHR)
+ 
++/* The mode's size as applications see it: sides swapped on a panel turned by
++ * 90 or 270 degrees (LightMoss). hdisplay and vdisplay stay the CRTC's.
++ */
++static uint32_t
++wsi_display_mode_width(const struct wsi_display_mode *mode)
++{
++   return mode->connector->rot_swap ? mode->vdisplay : mode->hdisplay;
++}
++
++static uint32_t
++wsi_display_mode_height(const struct wsi_display_mode *mode)
++{
++   return mode->connector->rot_swap ? mode->hdisplay : mode->vdisplay;
++}
++
+ static bool
+ wsi_display_mode_matches_drm(wsi_display_mode *wsi,
+                              drmModeModeInfoPtr drm)
+@@ -276,6 +305,322 @@
+ }
+ 
+ /*
++ * Panel rotation (LightMoss).
++ *
++ * A panel mounted rotated reports it in its connector's "panel orientation"
++ * property (from the device tree's "rotation"). The kernel's console turns
++ * its text to match; nothing turns what a KMS/DRM program shows, so
++ * VK_KHR_display presented sideways on such a panel. Where the CRTC's
++ * primary plane can rotate (a "rotation" property offering the angle), turn
++ * it, the way the kernel's fbdev emulation would for 0 and 180 degrees:
++ * Left Side Up -> 90, Upside Down -> 180, Right Side Up -> 270. For 90 and
++ * 270 the display's modes, plane capabilities and surface extents are shown
++ * with their sides swapped, applications render into images of that size,
++ * and the plane scans them out turned: the kernel's legacy drmModeSetCrtc()
++ * and drmModePageFlip() swap the source size of a primary plane turned by 90
++ * or 270 degrees.
++ *
++ * The plane is turned with drmModeObjectSetProperty() right before each
++ * drmModeSetCrtc() (DRM master needed), and turned upright again once the
++ * CRTC no longer shows one of our images (the swapchain's framebuffers are
++ * removed, which disables the plane), so the next program finds it as it
++ * was; the kernel's fbdev restore also resets it. A plane that refuses
++ * is set upright and leaves the display unturned and its sides unswapped
++ * from then on: the swapchain made for the swapped size is out of date,
++ * and the application's next one is not turned.
++ *
++ * MESA_KMS_PANEL_ROTATION overrides it: "0" leaves the panel alone, "90",
++ * "180" or "270" turns the plane by that many degrees (counter-clockwise,
++ * as DRM counts) whatever the connector says. On displays without a "panel
++ * orientation", or one that says Normal, nothing changes.
++ */
++#ifndef DRM_MODE_ROTATE_0
++#define DRM_MODE_ROTATE_0   (1 << 0)
++#define DRM_MODE_ROTATE_90  (1 << 1)
++#define DRM_MODE_ROTATE_180 (1 << 2)
++#define DRM_MODE_ROTATE_270 (1 << 3)
++#endif
++#ifndef DRM_PLANE_TYPE_PRIMARY
++#define DRM_PLANE_TYPE_PRIMARY 1
++#endif
++#ifndef DRM_CLIENT_CAP_UNIVERSAL_PLANES
++#define DRM_CLIENT_CAP_UNIVERSAL_PLANES 2
++#endif
++
++/* The rotation the panel wants: a DRM_MODE_ROTATE_* value, or 0 to leave it
++ * alone.
++ */
++static uint64_t
++wsi_display_panel_rotation_wanted(int fd, drmModeConnectorPtr drm_connector)
++{
++   const char *env = getenv("MESA_KMS_PANEL_ROTATION");
++   uint64_t rotation = 0;
++
++   if (env && *env) {
++      switch (atoi(env)) {
++      case 90:  return DRM_MODE_ROTATE_90;
++      case 180: return DRM_MODE_ROTATE_180;
++      case 270: return DRM_MODE_ROTATE_270;
++      default:  return 0;
++      }
++   }
++
++   for (int p = 0; p < drm_connector->count_props; p++) {
++      drmModePropertyPtr prop = drmModeGetProperty(fd, drm_connector->props[p]);
++      if (!prop)
++         continue;
++      if (!strcmp(prop->name, "panel orientation") &&
++          (prop->flags & DRM_MODE_PROP_ENUM)) {
++         for (int e = 0; e < prop->count_enums; e++) {
++            if (prop->enums[e].value != drm_connector->prop_values[p])
++               continue;
++            if (!strcmp(prop->enums[e].name, "Upside Down"))
++               rotation = DRM_MODE_ROTATE_180;
++            else if (!strcmp(prop->enums[e].name, "Left Side Up"))
++               rotation = DRM_MODE_ROTATE_90;
++            else if (!strcmp(prop->enums[e].name, "Right Side Up"))
++               rotation = DRM_MODE_ROTATE_270;
++         }
++      }
++      drmModeFreeProperty(prop);
++   }
++   return rotation;
++}
++
++/* The CRTC's own primary plane: the one legacy drmModeSetCrtc() and
++ * drmModePageFlip() scan out from. Every plane may list every CRTC as
++ * possible (MSM's DPU does), so the first compatible primary plane is not
++ * necessarily it. In order: the primary plane bound to the CRTC now, else
++ * the crtc_index-th primary plane (drivers create one primary per CRTC, in
++ * CRTC order), else the first primary plane that can be used with it.
++ * *rot_prop is that plane's "rotation" property if it offers the rotation,
++ * else 0. Returns 0 when there is no primary plane at all.
++ */
++static uint32_t
++wsi_display_crtc_primary_plane(int fd, drmModeResPtr mode_res,
++                               uint32_t crtc_id, uint64_t rotation,
++                               uint32_t *rot_prop)
++{
++   uint32_t found[3] = { 0, 0, 0 };     /* bound, by index, first compatible */
++   uint32_t found_rot[3] = { 0, 0, 0 };
++   int crtc_index = -1, primary_index = 0, rot_bit = 0;
++
++   *rot_prop = 0;
++   for (int c = 0; c < mode_res->count_crtcs; c++) {
++      if (mode_res->crtcs[c] == crtc_id) {
++         crtc_index = c;
++         break;
++      }
++   }
++   if (crtc_index < 0)
++      return 0;
++
++   /* The bit of the rotation in the property's bitmask. */
++   while (rot_bit < 4 && !(rotation & (1ull << rot_bit)))
++      rot_bit++;
++
++   drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
++   drmModePlaneResPtr planes = drmModeGetPlaneResources(fd);
++   if (!planes)
++      return 0;
++
++   for (uint32_t i = 0; i < planes->count_planes && !found[0]; i++) {
++      drmModePlanePtr plane = drmModeGetPlane(fd, planes->planes[i]);
++      if (!plane)
++         continue;
++
++      bool primary = false;
++      uint32_t rot = 0;
++      drmModeObjectPropertiesPtr props =
++         drmModeObjectGetProperties(fd, plane->plane_id, DRM_MODE_OBJECT_PLANE);
++      for (uint32_t k = 0; props && k < props->count_props; k++) {
++         drmModePropertyPtr prop = drmModeGetProperty(fd, props->props[k]);
++         if (!prop)
++            continue;
++         if (!strcmp(prop->name, "type")) {
++            primary = props->prop_values[k] == DRM_PLANE_TYPE_PRIMARY;
++         } else if (!strcmp(prop->name, "rotation") &&
++                    (prop->flags & DRM_MODE_PROP_BITMASK)) {
++            for (int e = 0; e < prop->count_enums; e++) {
++               if (prop->enums[e].value == (uint64_t) rot_bit)
++                  rot = prop->prop_id;
++            }
++         }
++         drmModeFreeProperty(prop);
++      }
++      drmModeFreeObjectProperties(props);
++
++      if (primary) {
++         const bool compatible = (plane->possible_crtcs & (1u << crtc_index)) != 0;
++         if (plane->crtc_id == crtc_id) {
++            found[0] = plane->plane_id;
++            found_rot[0] = rot;
++         }
++         if (primary_index == crtc_index && compatible && !found[1]) {
++            found[1] = plane->plane_id;
++            found_rot[1] = rot;
++         }
++         if (compatible && !found[2]) {
++            found[2] = plane->plane_id;
++            found_rot[2] = rot;
++         }
++         primary_index++;
++      }
++      drmModeFreePlane(plane);
++   }
++   drmModeFreePlaneResources(planes);
++
++   for (int j = 0; j < 3; j++) {
++      if (found[j]) {
++         *rot_prop = found_rot[j];
++         return found[j];
++      }
++   }
++   return 0;
++}
++
++/* Decides once per connector whether its panel is turned, which shows its
++ * modes with their sides swapped for 90 and 270: when the panel wants a
++ * rotation and the primary plane of the CRTC driving it now (or of the first
++ * CRTC it can use) offers it.
++ */
++static void
++wsi_display_probe_panel_rotation(int fd,
++                                 struct wsi_display_connector *connector,
++                                 drmModeConnectorPtr drm_connector)
++{
++   uint64_t rotation = wsi_display_panel_rotation_wanted(fd, drm_connector);
++   if (!rotation)
++      return;
++
++   drmModeResPtr mode_res = drmModeGetResources(fd);
++   if (!mode_res)
++      return;
++
++   uint32_t crtc_id = 0;
++   if (drm_connector->encoder_id) {
++      drmModeEncoderPtr encoder = drmModeGetEncoder(fd, drm_connector->encoder_id);
++      if (encoder) {
++         crtc_id = encoder->crtc_id;
++         drmModeFreeEncoder(encoder);
++      }
++   }
++   for (int e = 0; !crtc_id && e < drm_connector->count_encoders; e++) {
++      drmModeEncoderPtr encoder = drmModeGetEncoder(fd, drm_connector->encoders[e]);
++      if (!encoder)
++         continue;
++      for (int c = 0; !crtc_id && c < mode_res->count_crtcs; c++) {
++         if (encoder->possible_crtcs & (1u << c))
++            crtc_id = mode_res->crtcs[c];
++      }
++      drmModeFreeEncoder(encoder);
++   }
++
++   uint32_t rot_prop = 0;
++   uint32_t plane_id = crtc_id ?
++      wsi_display_crtc_primary_plane(fd, mode_res, crtc_id, rotation, &rot_prop) : 0;
++   drmModeFreeResources(mode_res);
++
++   if (!plane_id || !rot_prop) {
++      mesa_logw("display: the panel is mounted rotated, but its CRTC's "
++                "primary plane cannot turn it; presenting it unturned");
++      return;
++   }
++
++   connector->rot_value = rotation;
++   connector->rot_swap = rotation == DRM_MODE_ROTATE_90 ||
++                         rotation == DRM_MODE_ROTATE_270;
++}
++
++/* Turns the primary plane of the connector's CRTC, right before
++ * drmModeSetCrtc(). A plane that refuses (other than for want of DRM master)
++ * leaves the panel unturned and its sides unswapped from then on, and is set
++ * upright, in case an earlier mode set turned it. Returns false when that
++ * swapped the display's sides back: the swapchain's images, made for the
++ * swapped size, no longer fit the CRTC's mode.
++ */
++static bool
++wsi_display_turn_panel(struct wsi_display *wsi,
++                       struct wsi_display_connector *connector)
++{
++   if (!connector->rot_value)
++      return true;
++
++   if (!connector->rot_plane_id || connector->rot_crtc_id != connector->crtc_id) {
++      drmModeResPtr mode_res = drmModeGetResources(wsi->fd);
++      if (!mode_res)
++         return true;
++      connector->rot_plane_id =
++         wsi_display_crtc_primary_plane(wsi->fd, mode_res, connector->crtc_id,
++                                        connector->rot_value,
++                                        &connector->rot_prop_id);
++      connector->rot_crtc_id = connector->crtc_id;
++      drmModeFreeResources(mode_res);
++   }
++
++   int ret = -EINVAL;
++   if (connector->rot_plane_id && connector->rot_prop_id) {
++      drmSetClientCap(wsi->fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
++      ret = drmModeObjectSetProperty(wsi->fd, connector->rot_plane_id,
++                                     DRM_MODE_OBJECT_PLANE,
++                                     connector->rot_prop_id,
++                                     connector->rot_value);
++   }
++   if (ret == 0) {
++      if (!connector->rot_on) {
++         mesa_logi("display: panel mounted rotated, turned by plane %u "
++                   "(rotation 0x%x)", connector->rot_plane_id,
++                   (unsigned) connector->rot_value);
++      }
++      connector->rot_on = true;
++      return true;
++   }
++   if (ret == -EACCES)
++      return true;
++
++   mesa_logw("display: could not turn the panel's plane (%s); presenting "
++             "it unturned", strerror(-ret));
++   if (connector->rot_plane_id && connector->rot_prop_id) {
++      drmModeObjectSetProperty(wsi->fd, connector->rot_plane_id,
++                               DRM_MODE_OBJECT_PLANE, connector->rot_prop_id,
++                               DRM_MODE_ROTATE_0);
++   }
++   const bool swapped = connector->rot_swap;
++   connector->rot_value = 0;
++   connector->rot_swap = false;
++   connector->rot_on = false;
++   return !swapped;
++}
++
++/* Turns the plane upright again once the CRTC shows nothing of ours: the
++ * images' framebuffers are gone, which disabled the plane (a swapchain that
++ * replaced this one keeps it turned). The next present then sets the CRTC
++ * again, which turns the plane first, rather than flipping a CRTC that has
++ * no framebuffer.
++ */
++static void
++wsi_display_unturn_panel(struct wsi_display *wsi,
++                         struct wsi_display_connector *connector)
++{
++   if (!connector->rot_on || wsi->fd < 0)
++      return;
++
++   drmModeCrtcPtr crtc = drmModeGetCrtc(wsi->fd, connector->crtc_id);
++   bool showing = crtc && crtc->buffer_id != 0;
++   drmModeFreeCrtc(crtc);
++   if (showing)
++      return;
++
++   drmSetClientCap(wsi->fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
++   drmModeObjectSetProperty(wsi->fd, connector->rot_plane_id,
++                            DRM_MODE_OBJECT_PLANE, connector->rot_prop_id,
++                            DRM_MODE_ROTATE_0);
++   connector->rot_on = false;
++   /* The next present sets the CRTC again, turning the plane first. */
++   connector->active = false;
++}
++
++/*
+  * Update our information about a specific connector
+  */
+ 
+@@ -359,6 +704,12 @@
+       drmModeFreeProperty(prop);
+    }
+ 
++   /* A panel mounted rotated: whether its plane turns it (LightMoss) */
++   if (!connector->rot_probed) {
++      connector->rot_probed = true;
++      wsi_display_probe_panel_rotation(drm_fd, connector, drm_connector);
++   }
++
+    /* Mark all connector modes as invalid */
+    wsi_display_invalidate_connector_modes(connector);
+ 
+@@ -421,11 +772,15 @@
+    }
+ 
+    if (preferred_mode) {
+-      properties->physicalResolution.width = preferred_mode->hdisplay;
+-      properties->physicalResolution.height = preferred_mode->vdisplay;
++      properties->physicalResolution.width =
++         wsi_display_mode_width(preferred_mode);
++      properties->physicalResolution.height =
++         wsi_display_mode_height(preferred_mode);
+    } else if (largest_mode) {
+-      properties->physicalResolution.width = largest_mode->hdisplay;
+-      properties->physicalResolution.height = largest_mode->vdisplay;
++      properties->physicalResolution.width =
++         wsi_display_mode_width(largest_mode);
++      properties->physicalResolution.height =
++         wsi_display_mode_height(largest_mode);
+    } else {
+       properties->physicalResolution.width = 1024;
+       properties->physicalResolution.height = 768;
+@@ -678,8 +1033,8 @@
+    VkDisplayModePropertiesKHR *prop = &properties->displayModeProperties;
+ 
+    prop->displayMode = wsi_display_mode_to_handle(display_mode);
+-   prop->parameters.visibleRegion.width = display_mode->hdisplay;
+-   prop->parameters.visibleRegion.height = display_mode->vdisplay;
++   prop->parameters.visibleRegion.width = wsi_display_mode_width(display_mode);
++   prop->parameters.visibleRegion.height = wsi_display_mode_height(display_mode);
+    prop->parameters.refreshRate =
+       (uint32_t) (wsi_display_mode_refresh(display_mode) * 1000 + 0.5);
+ }
+@@ -738,8 +1093,8 @@
+ wsi_display_mode_matches_vk(wsi_display_mode *wsi,
+                             const VkDisplayModeParametersKHR *vk)
+ {
+-   return (vk->visibleRegion.width == wsi->hdisplay &&
+-           vk->visibleRegion.height == wsi->vdisplay &&
++   return (vk->visibleRegion.width == wsi_display_mode_width(wsi) &&
++           vk->visibleRegion.height == wsi_display_mode_height(wsi) &&
+            fabs(wsi_display_mode_refresh(wsi) * 1000.0 - vk->refreshRate) < 10);
+ }
+ 
+@@ -792,18 +1147,18 @@
+    pCapabilities->minSrcPosition.y = 0;
+    pCapabilities->maxSrcPosition.x = 0;
+    pCapabilities->maxSrcPosition.y = 0;
+-   pCapabilities->minSrcExtent.width = mode->hdisplay;
+-   pCapabilities->minSrcExtent.height = mode->vdisplay;
+-   pCapabilities->maxSrcExtent.width = mode->hdisplay;
+-   pCapabilities->maxSrcExtent.height = mode->vdisplay;
++   pCapabilities->minSrcExtent.width = wsi_display_mode_width(mode);
++   pCapabilities->minSrcExtent.height = wsi_display_mode_height(mode);
++   pCapabilities->maxSrcExtent.width = wsi_display_mode_width(mode);
++   pCapabilities->maxSrcExtent.height = wsi_display_mode_height(mode);
+    pCapabilities->minDstPosition.x = 0;
+    pCapabilities->minDstPosition.y = 0;
+    pCapabilities->maxDstPosition.x = 0;
+    pCapabilities->maxDstPosition.y = 0;
+-   pCapabilities->minDstExtent.width = mode->hdisplay;
+-   pCapabilities->minDstExtent.height = mode->vdisplay;
+-   pCapabilities->maxDstExtent.width = mode->hdisplay;
+-   pCapabilities->maxDstExtent.height = mode->vdisplay;
++   pCapabilities->minDstExtent.width = wsi_display_mode_width(mode);
++   pCapabilities->minDstExtent.height = wsi_display_mode_height(mode);
++   pCapabilities->maxDstExtent.width = wsi_display_mode_width(mode);
++   pCapabilities->maxDstExtent.height = wsi_display_mode_height(mode);
+    return VK_SUCCESS;
+ }
+ 
+@@ -894,8 +1249,8 @@
+    VkIcdSurfaceDisplay *surface = (VkIcdSurfaceDisplay *) surface_base;
+    wsi_display_mode *mode = wsi_display_mode_from_handle(surface->displayMode);
+ 
+-   caps->currentExtent.width = mode->hdisplay;
+-   caps->currentExtent.height = mode->vdisplay;
++   caps->currentExtent.width = wsi_display_mode_width(mode);
++   caps->currentExtent.height = wsi_display_mode_height(mode);
+ 
+    caps->minImageExtent = (VkExtent2D) { 1, 1 };
+    caps->maxImageExtent = (VkExtent2D) {
+@@ -1122,7 +1477,8 @@
+       vk_outarray_append_typed(VkRect2D, &out, rect) {
+          *rect = (VkRect2D) {
+             .offset = { 0, 0 },
+-            .extent = { mode->hdisplay, mode->vdisplay },
++            .extent = { wsi_display_mode_width(mode),
++                        wsi_display_mode_height(mode) },
+          };
+       }
+    }
+@@ -1228,6 +1584,10 @@
+    for (uint32_t i = 0; i < chain->base.image_count; i++)
+       wsi_display_image_finish(drv_chain, &chain->images[i]);
+ 
++   /* The plane upright again if it showed one of these images (LightMoss) */
++   wsi_display_unturn_panel(chain->wsi,
++      wsi_display_mode_from_handle(chain->surface->displayMode)->connector);
++
+    mtx_destroy(&chain->present_id_mutex);
+    u_cnd_monotonic_destroy(&chain->present_id_cond);
+ 
+@@ -1966,6 +2326,20 @@
+             return result;
+          }
+ 
++         /* A panel mounted rotated: turn the CRTC's primary plane first,
++          * so the mode set scans out the image turned (LightMoss). If the
++          * plane refused, the display's sides are no longer swapped and
++          * this swapchain's images do not fit its mode: out of date, so
++          * the application makes a new swapchain of the size the surface
++          * now reports.
++          */
++         if (!wsi_display_turn_panel(wsi, connector)) {
++            connector->active = false;
++            image->state = WSI_IMAGE_IDLE;
++            wsi_display_surface_error(chain, VK_ERROR_OUT_OF_DATE_KHR);
++            return VK_ERROR_OUT_OF_DATE_KHR;
++         }
++
+          /* XXX allow setting of position */
+          ret = drmModeSetCrtc(wsi->fd, connector->crtc_id,
+                               image->fb_id, 0, 0,
+@@ -2418,6 +2792,8 @@
+    if (wsi->fd >= 0) {
+       wsi_display_stop_wait_thread(wsi);
+ 
++      wsi_display_unturn_panel(wsi, wsi_display_connector_from_handle(display));
++
+       close(wsi->fd);
+       wsi->fd = -1;
+    }

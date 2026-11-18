@@ -52,6 +52,14 @@ SDL3_CONF_OPTS = \
 	-DSDL_LIBURING=OFF \
 	-DSDL_HIDAPI_LIBUSB=OFF
 
+# Vulkan where Mesa's Turnip is built (the Mini V2): KMS/DRM Vulkan windows
+# present through VK_KHR_display, with the Vulkan loader loaded at run time,
+# as SDL2 does. It overrides -DSDL_VULKAN=OFF above (the later -D wins); the
+# R36S's Mali blob has no Vulkan.
+ifeq ($(BR2_LIGHTMOSS_MESA3D_TURNIP),y)
+SDL3_CONF_OPTS += -DSDL_VULKAN=ON
+endif
+
 ifeq ($(BR2_PACKAGE_ALSA_LIB),y)
 SDL3_DEPENDENCIES += alsa-lib
 SDL3_CONF_OPTS += -DSDL_ALSA=ON
