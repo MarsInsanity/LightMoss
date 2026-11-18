@@ -25,6 +25,16 @@ Environment=HOME=/root
 # beside the first one's watchdogs, and at shutdown by
 # lightmoss-spruce-leftovers.service, before the card is unmounted.
 KillMode=process
+# Time for each ExecStartPre= below. mount-spruce checks a card partition that
+# was not cleanly unmounted (power cut, flat battery) before it mounts it, up
+# to 10 minutes each (and again on its retry if that check did not clean it).
+# With systemd's default of 90 s a longer check would fail the start:
+# KillMode=process leaves the check running, the restart's spruce-leftovers
+# ends it half done, and the card is checked again, for ever, without spruce
+# ever starting. Only the start is timed (Type=simple: runtime.sh has no
+# limit), and lightmoss-bless's wait on a trial start begins once the start is
+# done, so a check does not use it up.
+TimeoutStartSec=30min
 ExecStartPre=-/usr/libexec/lightmoss/spruce-leftovers 3
 ExecStartPre=/usr/libexec/lightmoss/mount-spruce
 # The LightMoss Update app onto the card; never in the way of the frontend.
