@@ -1,0 +1,37 @@
+From 2a09ec837e59f1401de011f42dc27acec20916ca Mon Sep 17 00:00:00 2001
+From: LightMoss <noreply@github.com>
+Date: Wed, 18 Nov 2026 14:44:53 +0000
+Subject: [PATCH] arm64: dts: qcom: sm8250-pwm-fan-cooling: poll the fan zone
+
+tsens only interrupts when the temperature crosses a threshold, and
+step_wise takes the fan down one trip per evaluation, on a falling reading.
+Without polling, the fan can stay at a higher level than the trips call for
+after a drop across several trips, or after userspace raises the trip
+temperatures (LightMoss's fan modes rewrite them). Poll the zone every two
+seconds so the fan always settles where the trips put it.
+---
+ arch/arm64/boot/dts/qcom/sm8250-pwm-fan-cooling.dtsi | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sm8250-pwm-fan-cooling.dtsi b/arch/arm64/boot/dts/qcom/sm8250-pwm-fan-cooling.dtsi
+index 59ce40aec..fbd550991 100644
+--- a/arch/arm64/boot/dts/qcom/sm8250-pwm-fan-cooling.dtsi
++++ b/arch/arm64/boot/dts/qcom/sm8250-pwm-fan-cooling.dtsi
+@@ -2,9 +2,17 @@
+ /*
+  * Bind the PWM fan to a thermal zone so the kernel drives it.
+  *
++ * The zone is also polled: tsens only interrupts when the temperature
++ * crosses a threshold, and the step_wise governor takes the fan down one
++ * trip per evaluation, and only on a falling reading. Without polling the
++ * fan could stay at a higher level than the trips call for, after a drop
++ * across several trips or after userspace moves the trips up (LightMoss's
++ * fan modes rewrite these trip temperatures).
+  */
+ 
+ &{/thermal-zones/cluster1-thermal} {
++	polling-delay = <2000>;
++
+ 	trips {
+ 		fan_active0: fan-active0 {
+ 			temperature = <45000>;
