@@ -10,7 +10,8 @@ config BR2_PACKAGE_SDL3
 	  Simple DirectMedia Layer 3, built the way SDL2 is here: the
 	  KMS/DRM video driver with OpenGL ES over the GBM/EGL provider
 	  (the Mali blob), ALSA audio, udev input hotplug. No X11,
-	  Wayland, Vulkan, PulseAudio, PipeWire or D-Bus.
+	  Wayland, PulseAudio, PipeWire or D-Bus; Vulkan only with
+	  BR2_LIGHTMOSS_MESA3D_TURNIP.
 
 	  For PortMaster ports that link libSDL3.so.0 (dArkMoss and
 	  ArkOS carry it since spruceUI/dArkMoss e598bfa).

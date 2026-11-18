@@ -1,5 +1,26 @@
 include $(sort $(wildcard $(BR2_EXTERNAL_LIGHTMOSS_PATH)/package/*/*.mk))
 
+# Turnip, Mesa's Vulkan driver for Adreno (the Mini V2's builds only).
+# BR2_LIGHTMOSS_MESA3D_TURNIP selects mesa3d's hidden Vulkan driver symbol,
+# so mesa3d.mk already depends on host-python-glslang and passes
+# -Dvulkan-drivers=<MESA3D_VULKAN_DRIVERS-y>: MESA3D_CONF_OPTS is a
+# recursively expanded variable, read when Mesa is configured, after this
+# file. Mesa installs the ICD manifest as
+# /usr/share/vulkan/icd.d/freedreno_icd.<cpu>.json (library_arch "64"); the
+# 32-bit one comes from package/lightmoss-lib32.
+ifeq ($(BR2_LIGHTMOSS_MESA3D_TURNIP),y)
+MESA3D_VULKAN_DRIVERS-y += freedreno
+
+# SDL2's Vulkan support, which buildroot's sdl2.mk turns off
+# (--disable-video-vulkan; the later --enable wins). Its KMS/DRM driver then
+# makes Vulkan surfaces on VK_KHR_display, drops DRM master for the Vulkan
+# driver and loads libvulkan.so.1 at run time: PPSSPP's and Flycast's Vulkan
+# backends go through it.
+ifeq ($(BR2_PACKAGE_SDL2),y)
+SDL2_CONF_OPTS += --enable-video-vulkan
+endif
+endif
+
 # The lib32 build: its libraries live in /usr/lib/arm-linux-gnueabihf on the
 # 64-bit image, next to the 64-bit ones in /usr/lib, so the armhf loader must
 # search that directory. glibc reads configparms from its build directory;
