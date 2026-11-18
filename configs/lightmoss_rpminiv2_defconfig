@@ -96,8 +96,21 @@ BR2_PACKAGE_ALSA_UCM_CONF=y
 BR2_PACKAGE_LIBEVDEV=y
 # Volume Up and Down come from two input devices; spruce watches one.
 BR2_PACKAGE_LIGHTMOSS_VOLKEYS=y
-# Bluetooth (the QCA6390's) is left for later: spruce's platform for this
-# device does not offer it yet, and bluetoothd + bluealsa would be its job.
+# Bluetooth (the QCA6390's, on hci_uart): BlueZ with bluetoothctl, which
+# spruce's bluetooth.sh drives; gamepads over HID and HID over GATT, and the
+# sixaxis plugin that pairs DualShock 3 pads over USB; bluez-alsa for A2DP
+# headsets (4.3.1 here: bluealsa, bluealsa-cli, a 64-bit ALSA plugin only).
+# spruce starts and stops both daemons from its Bluetooth setting, so they
+# ship disabled (system-preset/40-lightmoss-bluetooth.preset). No PAN: the
+# kernel has no BNEP.
+BR2_PACKAGE_BLUEZ5_UTILS=y
+BR2_PACKAGE_BLUEZ5_UTILS_CLIENT=y
+BR2_PACKAGE_BLUEZ5_UTILS_PLUGINS_AUDIO=y
+BR2_PACKAGE_BLUEZ5_UTILS_PLUGINS_HID=y
+BR2_PACKAGE_BLUEZ5_UTILS_PLUGINS_HOG=y
+BR2_PACKAGE_BLUEZ5_UTILS_PLUGINS_SIXAXIS=y
+# BR2_PACKAGE_BLUEZ5_UTILS_PLUGINS_NETWORK is not set
+BR2_PACKAGE_BLUEZ_ALSA=y
 
 # --- systemd: only what spruce relies on ----------------------------------------------
 # BR2_PACKAGE_SYSTEMD_HWDB is not set
