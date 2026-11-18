@@ -77,12 +77,20 @@ BR2_PACKAGE_HOST_MTOOLS=y
 # them in an initramfs (post-image.sh).
 BR2_PACKAGE_LIGHTMOSS_FIRMWARE_SM8250=y
 BR2_PACKAGE_WIRELESS_REGDB=y
-# Adreno 650: Mesa's freedreno (OpenGL ES, EGL, GBM).
+# Adreno 650: Mesa's freedreno (OpenGL ES, EGL, GBM), and desktop OpenGL
+# through libglvnd: libOpenGL.so.0 (no libGL.so.1, which is GLX and needs
+# X11), with libEGL.so.1, libGLESv1_CM.so.1 and libGLESv2.so.2 from glvnd
+# and Mesa as their vendor (libEGL_mesa.so.0, by
+# /usr/share/glvnd/egl_vendor.d/50_mesa.json). glvnd's libraries export
+# the same symbols as Mesa's own did. SDL loads libOpenGL.so.0 for a program
+# that asks for a desktop GL context; one that does not still gets OpenGL
+# ES, as before.
 BR2_PACKAGE_MESA3D=y
 BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_FREEDRENO=y
 BR2_PACKAGE_MESA3D_GBM=y
 BR2_PACKAGE_MESA3D_OPENGL_EGL=y
 BR2_PACKAGE_MESA3D_OPENGL_ES=y
+BR2_PACKAGE_LIBGLVND=y
 # Vulkan: Turnip (Mesa's freedreno Vulkan driver, this tree's option, see
 # Config.in) and the Khronos loader, libvulkan.so.1. Programs present
 # through VK_KHR_display; the panel is turned by Mesa as SDL turns it
