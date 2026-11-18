@@ -8,6 +8,7 @@ enable lightmoss-audio.service
 enable lightmoss-volkeys.service
 enable lightmoss-bless.service
 enable spruce-launch.service
+enable lightmoss-spruce-leftovers.service
 enable NetworkManager.service
 enable systemd-timesyncd.service
 
