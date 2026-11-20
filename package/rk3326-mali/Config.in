@@ -22,6 +22,19 @@ config BR2_PACKAGE_RK3326_MALI
 
 if BR2_PACKAGE_RK3326_MALI
 
+config BR2_PACKAGE_RK3326_MALI_G29P1
+	bool "also the g29p1 blob, for a BSP 5.10 kernel"
+	select BR2_LIGHTMOSS_SDL2_VULKAN if BR2_aarch64
+	select BR2_PACKAGE_VULKAN_LOADER if BR2_aarch64
+	help
+	  Installs rockchip's g29p1 blob (libmali-next, with Vulkan
+	  1.3) in /usr/lib/mali-g29p1, for the R36S's second kernel
+	  (lightmoss-linux510), whose kbase it matches. In the 64-bit
+	  image, lightmoss-mali-select bind-mounts it over the rxp0
+	  blob when a 5.10 kernel runs and gives the Vulkan loader its
+	  manifest; under 4.4 nothing changes. Set it in both the
+	  image's and the lib32 build's R36S defconfigs.
+
 config BR2_PACKAGE_PROVIDES_LIBEGL
 	default "rk3326-mali"
 

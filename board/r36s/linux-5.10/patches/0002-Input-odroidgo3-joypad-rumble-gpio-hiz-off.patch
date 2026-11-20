@@ -1,0 +1,93 @@
+From af6583b3857906e04ad3ebd4a2d1ae7b960fa1aa Mon Sep 17 00:00:00 2001
+From: LightMoss <lightmoss@localhost>
+Date: Fri, 20 Nov 2026 22:54:21 +0000
+Subject: [PATCH 2/5] Input: odroidgo3-joypad: rumble-gpio-hiz-off
+
+An LED in place of a rumble motor may be dark only while its pin is not
+driven at all. With the new boolean property rumble-gpio-hiz-off, the
+rumble GPIO is an input (released) while no effect plays and at probe,
+and is driven to its active level while one plays.
+
+The R36S clone on the G80CA-MB board has no rumble motor; LightMoss uses
+its blue front LED (gpio0 PA0) as the joypad's rumble-gpio, so spruce's
+vibrate and game rumble light it. On a G80CA-MB that LED was lit with
+the pin driven high at rest, dark with it released, and dark driven low
+for an effect; driven low at rest it was reported lit too, so between
+effects the driver has to let go of the pin rather than drive it low.
+
+Port of LightMoss's patch for the 4.4 kernel (board/r36s/linux/patches/
+0009-input-odroidgo3-joypad-rumble-gpio-hiz-off.patch); without the
+property the driver behaves as before.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QTkmtGvwQ3V8JXzMT2JqWV
+---
+ drivers/input/joystick/odroidgo3-joypad.c | 28 +++++++++++++++++++----
+ 1 file changed, 24 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/input/joystick/odroidgo3-joypad.c b/drivers/input/joystick/odroidgo3-joypad.c
+index 1c7463d88..5dc606e34 100644
+--- a/drivers/input/joystick/odroidgo3-joypad.c
++++ b/drivers/input/joystick/odroidgo3-joypad.c
+@@ -182,6 +182,7 @@ struct joypad {
+ 	/* 可选 GPIO 振动器 */
+ 	int rumble_gpio;
+ 	bool rumble_active_low;		/* GPIO 有效低电平 */
++	bool rumble_hiz_off;		/* off: release the pin (input), not drive it */
+ 	bool has_rumble;		/* 是否有振动功能 */
+ 
+ 	/* 摇杆切换功能（按住切换键时左摇杆→右摇杆） */
+@@ -233,6 +234,19 @@ static void pwm_vibrator_stop(struct joypad *joypad)
+ static inline void rumble_gpio_set(struct joypad *joypad, bool on)
+ {
+ 	int val = on ? 1 : 0;
++
++	/*
++	 * rumble-gpio-hiz-off: an LED in place of a motor that is dark only
++	 * while the pin is not driven; on drives it to its active level.
++	 */
++	if (joypad->rumble_hiz_off) {
++		if (on)
++			gpio_direction_output(joypad->rumble_gpio,
++					      joypad->rumble_active_low ? 0 : 1);
++		else
++			gpio_direction_input(joypad->rumble_gpio);
++		return;
++	}
+ 	if (joypad->rumble_active_low)
+ 		val = !val;
+ 	gpio_set_value(joypad->rumble_gpio, val);
+@@ -2710,6 +2724,8 @@ static int joypad_parse_rumble_gpio(struct device *dev, struct joypad *joypad)
+ 
+ 	joypad->rumble_gpio = gpio;
+ 	joypad->rumble_active_low = !!(gflags & OF_GPIO_ACTIVE_LOW);
++	joypad->rumble_hiz_off = of_property_read_bool(dev->of_node,
++						       "rumble-gpio-hiz-off");
+ 
+ 	err = devm_gpio_request(dev, joypad->rumble_gpio, "rumble-gpio");
+ 	if (err) {
+@@ -2718,13 +2734,17 @@ static int joypad_parse_rumble_gpio(struct device *dev, struct joypad *joypad)
+ 	}
+ 
+ 	/* 将GPIO设置为非活动状态 (马达关闭) */
+-	err = gpio_direction_output(joypad->rumble_gpio,
+-		joypad->rumble_active_low ? 1 : 0);
++	if (joypad->rumble_hiz_off)
++		err = gpio_direction_input(joypad->rumble_gpio);
++	else
++		err = gpio_direction_output(joypad->rumble_gpio,
++			joypad->rumble_active_low ? 1 : 0);
+ 	if (err)
+ 		return err;
+ 
+-	dev_info(dev, "rumble via GPIO: gpio=%d active_low=%d\n",
+-		 joypad->rumble_gpio, joypad->rumble_active_low);
++	dev_info(dev, "rumble via GPIO: gpio=%d active_low=%d hiz_off=%d\n",
++		 joypad->rumble_gpio, joypad->rumble_active_low,
++		 joypad->rumble_hiz_off);
+ 
+ 	return 0;
+ }
+-- 
+2.43.0
+

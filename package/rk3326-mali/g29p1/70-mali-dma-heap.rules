@@ -1,0 +1,2 @@
+# The Mali g29p1 blob (BSP 5.10 kernel) allocates from the DMA-BUF system heap.
+SUBSYSTEM=="dma_heap", KERNEL=="system*", GROUP="video", MODE="0660"

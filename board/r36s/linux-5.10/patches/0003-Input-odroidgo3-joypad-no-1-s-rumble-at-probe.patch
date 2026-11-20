@@ -1,0 +1,49 @@
+From 6297f13068082e82ccb5add44a80d0c44359447a Mon Sep 17 00:00:00 2001
+From: LightMoss <lightmoss@localhost>
+Date: Fri, 20 Nov 2026 22:54:31 +0000
+Subject: [PATCH 3/5] Input: odroidgo3-joypad: no 1 s rumble at probe
+
+The probe ran the rumble for a second with msleep(1000). The driver is
+built in (and probes from a late_initcall), so that second was spent
+inside the kernel's initcalls: the root filesystem was mounted, and
+userspace started, a second later on every boot (joypad_probe took
+1.007 s on a G80CA with the 4.4 kernel). On the G80CA the "rumble" is
+the blue LED, so all it did was blink it at boot.
+
+Port of LightMoss's patch for the 4.4 kernel (board/r36s/linux/patches/
+0010-input-odroidgo3-joypad-no-rumble-at-probe.patch).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QTkmtGvwQ3V8JXzMT2JqWV
+---
+ drivers/input/joystick/odroidgo3-joypad.c | 13 +++----------
+ 1 file changed, 3 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/input/joystick/odroidgo3-joypad.c b/drivers/input/joystick/odroidgo3-joypad.c
+index 5dc606e34..e5290b360 100644
+--- a/drivers/input/joystick/odroidgo3-joypad.c
++++ b/drivers/input/joystick/odroidgo3-joypad.c
+@@ -2911,17 +2911,10 @@ static int joypad_probe(struct platform_device *pdev)
+ 		return error;
+ 
+ 	/*
+-	 * 启动震动: 探测时振动1秒.
+-	 * 在注册输入设备之前完成, 使 sysfs 属性 (dev_groups, 探测返回后创建)
+-	 * 与输入设备几乎同时出现.
++	 * LightMoss: no 1 s rumble at probe. The driver is built in, so its
++	 * msleep(1000) held up the whole kernel boot (and the root mount) by
++	 * a second, to blink the LED that stands in for the G80CA's motor.
+ 	 */
+-	if (joypad->has_rumble) {
+-		joypad->level = 0xFFFF;
+-		joypad_vibrator_start(joypad);
+-		msleep(1000);
+-		joypad_vibrator_stop(joypad);
+-		joypad->level = 0;
+-	}
+ 
+ 	/* 轮询输入设备设置 */
+ 	error = joypad_input_setup(dev, joypad);
+-- 
+2.43.0
+

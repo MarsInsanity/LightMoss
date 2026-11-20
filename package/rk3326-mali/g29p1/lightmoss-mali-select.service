@@ -1,0 +1,13 @@
+[Unit]
+Description=LightMoss: the Mali blob for the running kernel
+Documentation=file:///usr/libexec/lightmoss/mali-select
+DefaultDependencies=no
+After=systemd-remount-fs.service
+Before=sysinit.target shutdown.target
+Conflicts=shutdown.target
+ConditionKernelVersion=>=5.10
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/lightmoss/mali-select

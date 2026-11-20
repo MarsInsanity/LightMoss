@@ -11,15 +11,6 @@ include $(sort $(wildcard $(BR2_EXTERNAL_LIGHTMOSS_PATH)/package/*/*.mk))
 ifeq ($(BR2_LIGHTMOSS_MESA3D_TURNIP),y)
 MESA3D_VULKAN_DRIVERS-y += freedreno
 
-# SDL2's Vulkan support, which buildroot's sdl2.mk turns off
-# (--disable-video-vulkan; the later --enable wins). Its KMS/DRM driver then
-# makes Vulkan surfaces on VK_KHR_display, drops DRM master for the Vulkan
-# driver and loads libvulkan.so.1 at run time: PPSSPP's and Flycast's Vulkan
-# backends go through it.
-ifeq ($(BR2_PACKAGE_SDL2),y)
-SDL2_CONF_OPTS += --enable-video-vulkan
-endif
-
 # Desktop OpenGL through libglvnd (the Mini V2's builds, as above): keep
 # glvnd's GL/gl.h, GL/glext.h and GL/glcorearb.h in staging for programs
 # built against libOpenGL.so.0 (pkg-config opengl). mesa3d.mk removes
@@ -31,6 +22,16 @@ ifeq ($(BR2_PACKAGE_LIBGLVND),y)
 MESA3D_POST_INSTALL_STAGING_HOOKS := \
 	$(filter-out MESA3D_REMOVE_OPENGL_HEADERS,$(MESA3D_POST_INSTALL_STAGING_HOOKS))
 endif
+endif
+
+# SDL2's Vulkan support (BR2_LIGHTMOSS_SDL2_VULKAN: the Mini V2's Turnip, the
+# R36S's g29p1 blob), which buildroot's sdl2.mk turns off
+# (--disable-video-vulkan; the later --enable wins). Its KMS/DRM driver then
+# makes Vulkan surfaces on VK_KHR_display, drops DRM master for the Vulkan
+# driver and loads libvulkan.so.1 at run time: PPSSPP's and Flycast's Vulkan
+# backends go through it.
+ifeq ($(BR2_LIGHTMOSS_SDL2_VULKAN)$(BR2_PACKAGE_SDL2),yy)
+SDL2_CONF_OPTS += --enable-video-vulkan
 endif
 
 # The lib32 build: its libraries live in /usr/lib/arm-linux-gnueabihf on the

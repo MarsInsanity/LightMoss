@@ -1,0 +1,13 @@
+config BR2_PACKAGE_LIGHTMOSS_LINUX510
+	bool "lightmoss-linux510 (R36S second kernel, BSP 5.10)"
+	depends on BR2_aarch64
+	depends on BR2_LINUX_KERNEL
+	help
+	  Rockchip's BSP 5.10 kernel (jokubasver/rockchip-kernel,
+	  arkos4clone-5.10) built next to the 4.4 kernel, for the
+	  R36S clone: Image-5.10, its DTBs for both panels and its
+	  modules in /lib/modules. boot.ini starts it instead of 4.4
+	  when "lightmoss-kernel-5.10" is on the BOOT partition. It
+	  runs the Mali g29p1 blob (rk3326-mali-g29p1), with Vulkan.
+
+	  Set only in configs/lightmoss_r36s_defconfig.

@@ -1,0 +1,47 @@
+From 25a343aa6bc2fc545bd46de3ec495ee9f4099d26 Mon Sep 17 00:00:00 2001
+From: LightMoss <lightmoss@localhost>
+Date: Fri, 20 Nov 2026 23:03:09 +0000
+Subject: [PATCH 1/5] kbuild: do not fail the build on new compiler warnings
+
+The Android common kernel wraps every compile in scripts/gcc-wrapper.py
+when CC is $(CROSS_COMPILE)gcc, and the wrapper turns any warning not on
+its allow-list into an error. The list is short and old; newer GCCs warn
+about code it does not know, so nothing builds. Whether the wrapper runs
+at all depends on the build host: its shebang is "#! /usr/bin/env
+python", so it is skipped where there is no "python", but buildroot puts
+one in its host directory whenever host-python3 is built, as it is for
+LightMoss. Do not use it; the kernel's own -Werror=... flags still apply.
+
+Same change as LightMoss's 4.4 patch board/r36s/linux/patches/
+0007-kbuild-do-not-fail-the-build-on-new-compiler-warnings.patch.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QTkmtGvwQ3V8JXzMT2JqWV
+---
+ Makefile | 10 +++-------
+ 1 file changed, 3 insertions(+), 7 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 883b9aafe..45dcf2d6d 100644
+--- a/Makefile
++++ b/Makefile
+@@ -487,13 +487,9 @@ LZ4		= lz4
+ XZ		= xz
+ ZSTD		= zstd
+ 
+-# Use the wrapper for the compiler. This wrapper scans for new
+-# warnings and causes the build to stop upon encountering them.
+-ifeq ($(CC),$(CROSS_COMPILE)gcc)
+-ifneq ($(wildcard $(srctree)/scripts/gcc-wrapper.py),)
+-CC		= $(abspath $(srctree)/scripts/gcc-wrapper.py) $(CROSS_COMPILE)gcc
+-endif
+-endif
++# LightMoss: Android's gcc-wrapper.py is not used. It fails the build on any
++# warning missing from its allow-list, which today's GCC always finds, and
++# only when the build host has a "python" (buildroot's host-python3 has).
+ 
+ PAHOLE_FLAGS	= $(shell PAHOLE=$(PAHOLE) $(srctree)/scripts/pahole-flags.sh)
+ 
+-- 
+2.43.0
+

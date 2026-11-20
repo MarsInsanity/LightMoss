@@ -43,6 +43,12 @@ define LIGHTMOSS_LIB32_INSTALL_TARGET_CMDS
 		mkdir -p $(TARGET_DIR)$(LIGHTMOSS_LIB32_LIBDIR)/gbm && \
 		cp -a $(@D)/usr/lib/gbm/. $(TARGET_DIR)$(LIGHTMOSS_LIB32_LIBDIR)/gbm/; \
 	fi
+	# The R36S's Mali g29p1 blob (rk3326-mali, BR2_PACKAGE_RK3326_MALI_G29P1):
+	# also in a directory of its own, for lightmoss-mali-select.
+	if [ -d $(@D)/usr/lib/mali-g29p1 ]; then \
+		mkdir -p $(TARGET_DIR)$(LIGHTMOSS_LIB32_LIBDIR)/mali-g29p1 && \
+		cp -a $(@D)/usr/lib/mali-g29p1/. $(TARGET_DIR)$(LIGHTMOSS_LIB32_LIBDIR)/mali-g29p1/; \
+	fi
 	ln -sf arm-linux-gnueabihf/ld-linux-armhf.so.3 \
 		$(TARGET_DIR)/usr/lib/ld-linux-armhf.so.3
 endef

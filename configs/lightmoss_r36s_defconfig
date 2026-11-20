@@ -71,6 +71,13 @@ BR2_PACKAGE_HOST_UBOOT_TOOLS=y
 BR2_PACKAGE_LINUX_FIRMWARE=y
 BR2_PACKAGE_LINUX_FIRMWARE_MEDIATEK_MT7601U=y
 BR2_PACKAGE_RK3326_MALI=y
+# The optional second kernel, Rockchip's BSP 5.10 (boot.ini starts it when
+# "lightmoss-kernel-5.10" is on BOOT), and the Mali g29p1 blob it runs, with
+# Vulkan; the selection is made at boot (lightmoss-mali-select). Buildroot's
+# strip is kept off the blobs, whose bytes are checked.
+BR2_PACKAGE_LIGHTMOSS_LINUX510=y
+BR2_PACKAGE_RK3326_MALI_G29P1=y
+BR2_STRIP_EXCLUDE_DIRS="/usr/lib/mali-g29p1 /usr/lib/arm-linux-gnueabihf/mali-g29p1"
 # The 32-bit (armhf) runtime, from configs/lightmoss_r36s_lib32_defconfig.
 BR2_PACKAGE_LIGHTMOSS_LIB32=y
 BR2_PACKAGE_ALSA_LIB=y

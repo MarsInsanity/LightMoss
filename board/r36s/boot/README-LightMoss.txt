@@ -26,6 +26,17 @@ counts through 7 numbered steps, each trying the LED's pins another way. Note
 the step numbers at which the LED is on. The file deletes itself (the test
 runs once) and the details go to lightmoss-ledtest.txt here.
 
+The 5.10 kernel (experimental, for Vulkan)
+------------------------------------------
+LightMoss starts its 4.4 kernel. It also carries Rockchip's 5.10 kernel with
+the newer Mali driver (g29p1), which adds Vulkan (as arkos4clone's and
+dArkOSen's 5.10 options do). To start 5.10, create an empty file named
+"lightmoss-kernel-5.10" (no extension) in this folder; delete it to go back
+to 4.4. Over SSH, "lightmoss-kernel 5.10" / "lightmoss-kernel 4.4" does the
+same, and "lightmoss-kernel" shows the choice. It takes effect at the next
+start, and updates keep it. If 5.10 does not start, delete the file from a
+computer.
+
 SSH
 ---
 spruce's Network Settings turns SSH on and off. Log in as "spruce" (or
