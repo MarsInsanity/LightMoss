@@ -170,6 +170,7 @@ mkfs.vfat -F 16 -n SPRUCEOS --offset "$E3" "$W/emmc.disk" $(($(mbr_size "$W/emmc
 echo keep > "$W/keep.txt"; fat_put emmc 3 "$W/keep.txt" keep.txt
 fat_put emmc 1 "$W/empty" headphones-invert
 fat_put emmc 1 "$W/empty" lightmoss-debug
+fat_put emmc 1 "$W/empty" lightmoss-kernel-5.10
 ext_do emmc 2 'echo emmc-machine-id > etc/machine-id; mkdir -p etc/dropbear; echo key > etc/dropbear/dropbear_ed25519_host_key'
 fat_del tf1 3 LightMoss.rkimg.done
 fat_put tf1 3 "$XZ" lightmoss-r36s-v9.9.9.RKIMG
@@ -177,7 +178,7 @@ run tf1 1
 check "eMMC signature kept" '[ "$(sig emmc)" = "$ES" ]'
 check "eMMC SPRUCEOS kept, with its files" '[ "$(mbr_start "$W/emmc.disk" 3)" = "$E3" ] && [ "$(fat_cat emmc 3 keep.txt)" = keep ]'
 check "machine ID and SSH host key kept" 'ext_do emmc 2 "grep -qx emmc-machine-id etc/machine-id && grep -qx key etc/dropbear/dropbear_ed25519_host_key"'
-check "headphones-invert and lightmoss-debug kept" 'fat_has emmc 1 headphones-invert && fat_has emmc 1 lightmoss-debug'
+check "headphones-invert, lightmoss-debug and lightmoss-kernel-5.10 kept" 'fat_has emmc 1 headphones-invert && fat_has emmc 1 lightmoss-debug && fat_has emmc 1 lightmoss-kernel-5.10'
 check "eMMC boot.ini boots its own root" 'fat_cat emmc 1 boot.ini | grep -q "root=PARTUUID=$ES-02"'
 check "mode was update, verified, image renamed .done" 'fat_cat tf1 1 lightmoss-update.log | grep -q "mode: update" && fat_cat tf1 1 lightmoss-update.log | grep -q "written and verified" && fat_has tf1 3 lightmoss-r36s-v9.9.9.RKIMG.done'
 fat_del tf1 3 lightmoss-r36s-v9.9.9.RKIMG.done

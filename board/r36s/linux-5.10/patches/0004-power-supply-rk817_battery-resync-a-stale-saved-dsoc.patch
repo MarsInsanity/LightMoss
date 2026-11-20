@@ -1,0 +1,47 @@
+From 207d3aad3b70ac453a88aeacc20c5de29a2b0468 Mon Sep 17 00:00:00 2001
+From: LightMoss <lightmoss@localhost>
+Date: Fri, 20 Nov 2026 22:55:08 +0000
+Subject: [PATCH 4/5] power: supply: rk817_battery: resync a stale saved dsoc
+ at probe
+
+The gauge keeps the displayed state of charge (dsoc) in RK817 registers
+that survive a reboot, and the driver starts from it when U-Boot has
+already initialised the gauge. A dsoc saved by another OS on the same
+card or eMMC (LightMoss boots the 4.4 or this 5.10 kernel, other R36S
+systems leave their own value) can be far from the charge the coulomb
+counter holds, and the battery then reads wrong until it is charged to
+full. When the saved dsoc is more than 10% from the counted charge
+(rsoc), start from the counted charge and save it.
+
+Port of the second half of LightMoss's 4.4 patch board/r36s/linux/
+patches/0005-power-rk817-battery-fuel-gauge-soc.patch, so both kernels
+LightMoss can boot treat the saved value alike. Its first half (report
+the fuel gauge SOC instead of the RG351P voltage line) is not needed:
+this driver already reports (dsoc + 400) / 1000.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QTkmtGvwQ3V8JXzMT2JqWV
+---
+ drivers/power/supply/rk817_battery.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drivers/power/supply/rk817_battery.c b/drivers/power/supply/rk817_battery.c
+index 86ed9dbb8..86a833f6f 100644
+--- a/drivers/power/supply/rk817_battery.c
++++ b/drivers/power/supply/rk817_battery.c
+@@ -1660,6 +1660,12 @@ static void rk817_bat_init_fg(struct rk817_battery_device *battery)
+ 	rk817_bat_rsoc_init(battery);
+ 	rk817_bat_init_coulomb_cap(battery, battery->nac);
+ 	DBG("rsoc%d, fcc = %d\n", battery->rsoc, battery->fcc);
++	/* A saved dsoc left by another OS survives U-Boot's init; start from the counted charge */
++	if (abs(battery->dsoc - battery->rsoc) > 10 * 1000) {
++		BAT_INFO("dsoc %d far from rsoc %d, resync\n", battery->dsoc, battery->rsoc);
++		battery->dsoc = battery->rsoc;
++		rk817_bat_save_dsoc(battery, battery->dsoc);
++	}
+ 	rk817_bat_init_dsoc_algorithm(battery);
+ 	battery->qmax = rk817_bat_get_qmax(battery);
+ 	battery->voltage_avg = rk817_bat_get_battery_voltage(battery);
+-- 
+2.43.0
+

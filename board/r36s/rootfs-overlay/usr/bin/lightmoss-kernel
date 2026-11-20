@@ -1,0 +1,39 @@
+#!/bin/sh
+# lightmoss-kernel [4.4|5.10]
+#
+# Shows, or chooses, the kernel the R36S starts next. 4.4 is LightMoss's
+# default; 5.10 is the optional BSP 5.10 kernel with the Mali g29p1 blob
+# (Vulkan). The choice is the file lightmoss-kernel-5.10 on the BOOT
+# partition, which boot.ini reads; from a computer, creating or deleting that
+# empty file does the same. It takes effect at the next start, and updates
+# keep it.
+set -u
+
+usage() {
+	echo "usage: lightmoss-kernel [4.4|5.10]  (no argument: show the current choice)" >&2
+	exit 2
+}
+
+/usr/libexec/lightmoss/mount-boot || { echo "lightmoss-kernel: cannot mount BOOT" >&2; exit 1; }
+flag=/boot/lightmoss-kernel-5.10
+
+next() {
+	if [ -e "$flag" ] && [ -e /boot/Image-5.10 ]; then echo 5.10; else echo 4.4; fi
+}
+
+case "${1:-}" in
+"")
+	echo "running:    $(uname -r)"
+	echo "next start: $(next)"
+	;;
+5.10)
+	[ -e /boot/Image-5.10 ] || { echo "lightmoss-kernel: this image has no Image-5.10" >&2; exit 1; }
+	: > "$flag" && sync
+	echo "next start: $(next) (restart to switch)"
+	;;
+4.4)
+	rm -f "$flag" && sync
+	echo "next start: $(next) (restart to switch)"
+	;;
+*) usage ;;
+esac

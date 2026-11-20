@@ -48,6 +48,71 @@ RK3326_MALI_LIB_SYMLINKS = \
 	libGLESv3.so libGLESv3.so.3 \
 	libgbm.so libgbm.so.1 libgbm.so.1.0.0
 
+# The g29p1 blob for the R36S's second kernel (BSP 5.10, package
+# lightmoss-linux510), whose g29p1 kbase it matches; it adds Vulkan (1.3,
+# VK_KHR_display). From rockchip's libmali-next (JeffyCN/mirrors), the build
+# arkos4clone and dArkOSen use. It is installed beside the rxp0 blob, in
+# /usr/lib/mali-g29p1, and only lightmoss-mali-select puts it in rxp0's
+# place, by bind mount, when a 5.10 kernel is running: 4.4 is untouched.
+RK3326_MALI_G29P1_COMMIT = bf621d15f009509557d6b28f81427651695cac20
+RK3326_MALI_G29P1_ARCH = $(if $(BR2_arm),arm-linux-gnueabihf,aarch64-linux-gnu)
+RK3326_MALI_G29P1_FILE = libmali-bifrost-g31-g29p1.so
+ifeq ($(BR2_PACKAGE_RK3326_MALI_G29P1),y)
+RK3326_MALI_EXTRA_DOWNLOADS += \
+	https://raw.githubusercontent.com/JeffyCN/mirrors/$(RK3326_MALI_G29P1_COMMIT)/lib/$(RK3326_MALI_G29P1_ARCH)/$(RK3326_MALI_G29P1_FILE)
+
+# The armhf blob lists PT_GNU_STACK second among its program headers, before
+# the LOAD segments it sits between; arkos4clone and dArkOSen move that entry
+# (32 bytes at offset 84) after the other eight. The result is checked
+# against the sha256 both of them check.
+RK3326_MALI_G29P1_ARMHF_FIXED_SHA256 = 92455f88319628cb4623564c6dadcc3024123e8ae245eea7e8e13721efa87595
+ifeq ($(BR2_arm),y)
+define RK3326_MALI_G29P1_FIX_ARMHF
+	cd $(@D) && cp g29p1/$(RK3326_MALI_G29P1_FILE) g29p1/orig.so && \
+	{ dd if=g29p1/orig.so bs=1 skip=52 count=32 status=none; \
+	  dd if=g29p1/orig.so bs=1 skip=116 count=224 status=none; \
+	  dd if=g29p1/orig.so bs=1 skip=84 count=32 status=none; } > g29p1/phdr && \
+	dd if=g29p1/phdr of=g29p1/$(RK3326_MALI_G29P1_FILE) bs=1 seek=52 \
+		conv=notrunc status=none && \
+	echo "$(RK3326_MALI_G29P1_ARMHF_FIXED_SHA256)  g29p1/$(RK3326_MALI_G29P1_FILE)" | \
+		sha256sum -c - && rm -f g29p1/orig.so g29p1/phdr
+endef
+endif
+
+define RK3326_MALI_G29P1_EXTRACT
+	mkdir -p $(@D)/g29p1
+	cp $(RK3326_MALI_DL_DIR)/$(RK3326_MALI_G29P1_FILE) $(@D)/g29p1/
+	$(RK3326_MALI_G29P1_FIX_ARMHF)
+endef
+RK3326_MALI_POST_EXTRACT_HOOKS += RK3326_MALI_G29P1_EXTRACT
+
+# In its own directory, never on the library path; buildroot's strip is kept
+# off it (BR2_STRIP_EXCLUDE_DIRS) so the checked bytes stay as they are.
+define RK3326_MALI_G29P1_INSTALL
+	$(INSTALL) -D -m 0755 $(@D)/g29p1/$(RK3326_MALI_G29P1_FILE) \
+		$(TARGET_DIR)/usr/lib/mali-g29p1/$(RK3326_MALI_G29P1_FILE)
+endef
+RK3326_MALI_POST_INSTALL_TARGET_HOOKS += RK3326_MALI_G29P1_INSTALL
+
+# The 64-bit image also gets the switch and the Vulkan pieces.
+ifeq ($(BR2_aarch64),y)
+define RK3326_MALI_G29P1_INSTALL_SELECT
+	$(INSTALL) -D -m 0755 $(RK3326_MALI_PKGDIR)/g29p1/lightmoss-mali-select \
+		$(TARGET_DIR)/usr/libexec/lightmoss/mali-select
+	$(INSTALL) -D -m 0644 $(RK3326_MALI_PKGDIR)/g29p1/lightmoss-mali-select.service \
+		$(TARGET_DIR)/usr/lib/systemd/system/lightmoss-mali-select.service
+	mkdir -p $(TARGET_DIR)/usr/lib/systemd/system/sysinit.target.wants
+	ln -sf ../lightmoss-mali-select.service \
+		$(TARGET_DIR)/usr/lib/systemd/system/sysinit.target.wants/lightmoss-mali-select.service
+	$(INSTALL) -D -m 0644 $(RK3326_MALI_PKGDIR)/g29p1/70-mali-dma-heap.rules \
+		$(TARGET_DIR)/usr/lib/udev/rules.d/70-mali-dma-heap.rules
+	mkdir -p $(TARGET_DIR)/etc/vulkan/icd.d
+	ln -sf /run/lightmoss/mali_icd.json $(TARGET_DIR)/etc/vulkan/icd.d/mali.json
+endef
+RK3326_MALI_POST_INSTALL_TARGET_HOOKS += RK3326_MALI_G29P1_INSTALL_SELECT
+endif
+endif
+
 define RK3326_MALI_EXTRACT_CMDS
 	cp $(RK3326_MALI_DL_DIR)/$(RK3326_MALI_SOURCE) $(@D)/
 	cp $(RK3326_MALI_DL_DIR)/END_USER_LICENCE_AGREEMENT.txt $(@D)/

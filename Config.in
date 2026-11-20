@@ -9,10 +9,18 @@ config BR2_LIGHTMOSS_LIB32
 	  in /usr/lib/arm-linux-gnueabihf (package lightmoss-lib32). Its
 	  glibc's loader searches that directory.
 
+config BR2_LIGHTMOSS_SDL2_VULKAN
+	bool
+	help
+	  SDL2 built with its Vulkan support (external.mk), which
+	  buildroot's sdl2 package turns off. Selected by the Vulkan
+	  drivers LightMoss carries.
+
 config BR2_LIGHTMOSS_MESA3D_TURNIP
 	bool "Mesa Vulkan freedreno driver (Turnip)"
 	depends on BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_FREEDRENO
 	select BR2_PACKAGE_MESA3D_VULKAN_DRIVER
+	select BR2_LIGHTMOSS_SDL2_VULKAN
 	help
 	  Mesa's Vulkan driver for Adreno GPUs (Turnip,
 	  -Dvulkan-drivers=freedreno), which buildroot's mesa3d package
@@ -25,6 +33,7 @@ config BR2_LIGHTMOSS_MESA3D_TURNIP
 
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/rk3326-mali/Config.in"
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/rk3326-uboot/Config.in"
+	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/lightmoss-linux510/Config.in"
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/hpjackd/Config.in"
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/lightmoss-lib32/Config.in"
 	source "$BR2_EXTERNAL_LIGHTMOSS_PATH/package/sdl3/Config.in"
