@@ -31,7 +31,7 @@ case "${1:-}" in
 	case "$(uname -r)" in
 	5.10.*) ;;
 	*) [ -e "$flag" ] && [ -e "$try" ] &&
-		echo "(5.10 is chosen, but its last start did not get to spruce: run 'lightmoss-kernel 5.10' to try again)" ;;
+		echo "(5.10 is chosen, but its last start did not keep spruce up for 3 minutes: run 'lightmoss-kernel 5.10' to try again)" ;;
 	esac
 	;;
 5.10)

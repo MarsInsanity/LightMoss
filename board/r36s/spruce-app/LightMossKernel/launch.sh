@@ -10,7 +10,7 @@
 # boot.ini reads (updates keep it). Every 5.10 start is a try: boot.ini
 # writes lightmoss-kernel-5.10-trying first and starts 4.4 while it is there;
 # LightMoss removes it once spruce is up on 5.10 (lightmoss-kernel-ok). So if
-# 5.10 does not get to spruce, the next start is 4.4, and this app says so
+# 5.10 does not get spruce running for 3 minutes, the next start is 4.4, and this app says so
 # and offers another try.
 
 . /mnt/SDCARD/spruce/scripts/helperFunctions.sh
@@ -42,7 +42,7 @@ esac
 log_message "LightMoss Kernel: running $(uname -r); 5.10 chosen: $([ -f "$FLAG" ] && echo yes || echo no); try marker: $([ -f "$TRY" ] && echo yes || echo no)"
 
 if [ "$RUNNING" = 4.4 ] && [ -f "$FLAG" ] && [ -f "$TRY" ]; then
-	show "The 5.10 kernel did not get as far as spruce the last time, so LightMoss started its 4.4 kernel instead.\n\nPress A to try 5.10 again (turn the volume down first), or B to stay on 4.4."
+	show "The last 5.10 start did not keep spruce running for 3 minutes (it stopped, froze or was switched off), so LightMoss started its 4.4 kernel instead.\n\nPress A to try 5.10 again (turn the volume down first), or B to stay on 4.4."
 	if confirm; then
 		rm -f "$TRY"
 		restart
