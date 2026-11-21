@@ -27,10 +27,13 @@ LIGHTMOSS_LINUX510_DEPENDENCIES = host-bison host-flex host-kmod host-openssl
 LIGHTMOSS_LINUX510_BOARD_DIR = $(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/r36s/linux-5.10
 LIGHTMOSS_LINUX510_DEFCONFIG = clone_defconfig
 LIGHTMOSS_LINUX510_FRAGMENT = $(LIGHTMOSS_LINUX510_BOARD_DIR)/lightmoss-5.10.config
-# kernel DTB name -> name on the BOOT partition (boot.ini adds -5.10)
+# kernel DTB name -> name on the BOOT partition (boot.ini adds -5.10); the -oc
+# ones are the opt-in CPU overclock (lightmoss-cpu-overclock on BOOT)
 LIGHTMOSS_LINUX510_DTBS = \
 	rk3326-r36sclone-linux \
-	rk3326-r36sclone-panel9-linux
+	rk3326-r36sclone-panel9-linux \
+	rk3326-r36sclone-linux-oc \
+	rk3326-r36sclone-panel9-linux-oc
 
 # As buildroot's linux.mk does it: host make environment (host-pkgconf finds
 # host libraries), the kernel's host programs built with the host compiler

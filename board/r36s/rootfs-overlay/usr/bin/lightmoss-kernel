@@ -1,47 +1,66 @@
 #!/bin/sh
-# lightmoss-kernel [4.4|5.10]
+# lightmoss-kernel [4.4|5.10|5.10-oc]
 #
 # Shows, or chooses, the kernel the R36S starts next. 4.4 is LightMoss's
 # default; 5.10 is the optional BSP 5.10 kernel with the Mali g29p1 blob
-# (Vulkan). The choice is the file lightmoss-kernel-5.10 on the BOOT
+# (Vulkan); 5.10-oc is 5.10 with the opt-in CPU overclock (1416/1512 MHz at
+# 1.4 V; plain 5.10 holds the CPU at Rockchip's 1248/1296 MHz). The choice is
+# the files lightmoss-kernel-5.10 and lightmoss-cpu-overclock on the BOOT
 # partition, which boot.ini reads (the LightMoss Kernel app in spruce sets
-# it too); updates keep it. Every 5.10 start is a try: boot.ini leaves
-# lightmoss-kernel-5.10-trying on BOOT until spruce is up on 5.10, and while
-# that marker is there it starts 4.4. Choosing 5.10 here clears it, for
-# another try.
+# them too); updates keep them. Every 5.10 start is a try: boot.ini leaves
+# lightmoss-kernel-5.10-trying on BOOT until spruce has run on 5.10 for 3
+# minutes, and while that marker is there it starts 4.4. Choosing 5.10 or
+# 5.10-oc here clears it, for another try.
 set -u
 
 usage() {
-	echo "usage: lightmoss-kernel [4.4|5.10]  (no argument: show the current choice)" >&2
+	echo "usage: lightmoss-kernel [4.4|5.10|5.10-oc]  (no argument: show the current choice)" >&2
 	exit 2
 }
 
 /usr/libexec/lightmoss/mount-boot || { echo "lightmoss-kernel: cannot mount BOOT" >&2; exit 1; }
 flag=/boot/lightmoss-kernel-5.10
 try=/boot/lightmoss-kernel-5.10-trying
+oc=/boot/lightmoss-cpu-overclock
 
 next() {
-	if [ -e "$flag" ] && [ -e /boot/Image-5.10 ] && [ ! -e "$try" ]; then echo 5.10; else echo 4.4; fi
+	if [ -e "$flag" ] && [ -e /boot/Image-5.10 ] && [ ! -e "$try" ]; then
+		if [ -e "$oc" ]; then echo "5.10 with the CPU overclock"; else echo 5.10; fi
+	else
+		echo 4.4
+	fi
+}
+
+choose510() {
+	[ -e /boot/Image-5.10 ] || { echo "lightmoss-kernel: this image has no Image-5.10" >&2; exit 1; }
+	rm -f "$try"
+	: > "$flag" && sync
 }
 
 case "${1:-}" in
 "")
-	echo "running:    $(uname -r)"
+	r="$(uname -r)"
+	grep -q 'max_cpufreq=' /proc/cmdline 2>/dev/null && r="$r, with the CPU overclock"
+	echo "running:    $r"
 	echo "next start: $(next)"
 	case "$(uname -r)" in
 	5.10.*) ;;
 	*) [ -e "$flag" ] && [ -e "$try" ] &&
-		echo "(5.10 is chosen, but its last start did not keep spruce up for 3 minutes: run 'lightmoss-kernel 5.10' to try again)" ;;
+		echo "(5.10 is chosen, but its last start did not keep spruce up for 3 minutes: run 'lightmoss-kernel 5.10' or '5.10-oc' to try again)" ;;
 	esac
 	;;
 5.10)
-	[ -e /boot/Image-5.10 ] || { echo "lightmoss-kernel: this image has no Image-5.10" >&2; exit 1; }
-	case "$(uname -r)" in 5.10.*) ;; *) rm -f "$try" ;; esac
-	: > "$flag" && sync
+	rm -f "$oc"
+	choose510
+	echo "next start: $(next) (restart to switch)"
+	;;
+5.10-oc)
+	: > "$oc"
+	choose510
 	echo "next start: $(next) (restart to switch)"
 	;;
 4.4)
-	rm -f "$flag" "$try" && sync
+	rm -f "$flag" "$try" "$oc" && sync
 	echo "next start: $(next) (restart to switch)"
 	;;
 *) usage ;;

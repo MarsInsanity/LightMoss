@@ -16,7 +16,7 @@
 #    system partition are rewritten; the partition table, SPRUCEOS (spruce on
 #    it), the disk signature, the machine ID, the SSH host keys, the panel
 #    choice (uboot.dtb), headphones-invert, lightmoss-debug and the kernel
-#    choice (lightmoss-kernel-5.10) stay;
+#    choice (lightmoss-kernel-5.10, lightmoss-cpu-overclock) stay;
 #  - anything else on the eMMC (EmuELEC) is replaced by a fresh install.
 # The charger is required because a write cut short leaves no system there (a
 # LightMoss card in TF1 still boots, and can repair it).
@@ -350,6 +350,7 @@ update() {
 		if mount -o ro "$T1" /mnt/old; then
 			[ -e /mnt/old/headphones-invert ] && touch /tmp/keep/headphones-invert
 			[ -e /mnt/old/lightmoss-kernel-5.10 ] && touch /tmp/keep/lightmoss-kernel-5.10
+			[ -e /mnt/old/lightmoss-cpu-overclock ] && touch /tmp/keep/lightmoss-cpu-overclock
 			[ -e /mnt/old/lightmoss-debug ] && DEBUG=1
 			# The Panel 9 swap of R36S-PANEL.txt: keep U-Boot starting on Panel 9.
 			cmp -s /mnt/old/uboot.dtb /mnt/old/uboot-panel9.dtb 2>/dev/null && touch /tmp/keep/panel9
@@ -403,6 +404,8 @@ update() {
 	[ -e /tmp/keep/headphones-invert ] && touch /mnt/old/headphones-invert
 	[ -e /tmp/keep/lightmoss-kernel-5.10 ] && touch /mnt/old/lightmoss-kernel-5.10 &&
 		log "lightmoss-kernel-5.10 kept"
+	[ -e /tmp/keep/lightmoss-cpu-overclock ] && touch /mnt/old/lightmoss-cpu-overclock &&
+		log "lightmoss-cpu-overclock kept"
 	[ "$DEBUG" = 1 ] && touch /mnt/old/lightmoss-debug && log "lightmoss-debug kept"
 	[ -e /tmp/keep/panel9 ] && cp /mnt/old/uboot-panel9.dtb /mnt/old/uboot.dtb
 	umount /mnt/old
