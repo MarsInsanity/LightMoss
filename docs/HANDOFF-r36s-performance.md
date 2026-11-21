@@ -33,7 +33,7 @@ anything. Facts here were checked against the code and the device; where somethi
 
 | | State |
 |---|---|
-| Release | **v0.3.8** (2026-11-21). |
+| Release | **v0.3.8** (2026-11-21). LightMoss Report (§5.A) is on branch `claude/gallant-pascal-ir2nwf`, not yet in a release. |
 | Kernels | 4.4 (default) and the optional BSP **5.10** with Vulkan, chosen in the **LightMoss Kernel** spruce app. |
 | 5.10 on the owner's unit | Starts and runs stably at Rockchip's CPU speeds; Vulkan works in PPSSPP. |
 | PSP on Vulkan (owner-installed build, §4.2) | Ridge Racer: clearly faster than OpenGL, which ran ~42/60 with stutter. **God of War: Chains of Olympus shows "10/30 (100%)" on both OpenGL and Vulkan: full speed, but only 10 of the game's 30 frames drawn.** That's most likely frame skipping; the real rendering speed is still unmeasured (§4.3). |
@@ -162,39 +162,60 @@ LightMoss is a buildroot 2025.11.3 system that **impersonates a dArkMoss base**,
   `L = 10-193`, `R = 10-192`, `Start = 10-197`, `Select = 10-196`, with Select-combo hotkeys (as spruce's
   `controls-Miniloong.ini`).
 
-### 4.5 The target, verify it before chasing it
-- The Reddit post the owner shared (djparentx, dArkOSen) claimed **God of War: Ghost of Sparta** at a smooth 30 FPS on an
-  **R36H ProMax** (`rk3326-r45h`, an RK3326 handheld that may have a better-binned chip), "available on the 15th".
-- The owner understands dArkOS RE reached 30 FPS on **Chains of Olympus** with help from an AI agent. Find the primary
-  source: `github.com/djparentx/dArkOSen-R36S` (README; `BETA/BSP_5.10_kernel.zip`; `usr/local/bin/perfmax`;
-  `opt/ppsspp/`), their Reddit and Discord posts, and the dArkOS RE repositories.
-- Establish exactly: game, scene, device, clocks, PPSSPP version/build and settings (frameskip? speed hacks?).
-- What's known of dArkOSen's setup:
-  - 5.10.252-darkosen kernel, booted with `max_cpufreq=1512 boot_cpufreq=1296`.
-  - CPU 1416–1512 MHz at 1.4 V and GPU 600 MHz.
-  - `perfmax` sets the GPU, CPU **and DMC** governors to `performance` for games.
-  - PPSSPP **1.20.4**.
-- The owner's unit can't run their CPU clocks (§3.3). Match everything else.
+### 4.5 The target, verified (2026-11-21)
+No primary source says "God of War at a steady 30 FPS" in so many words (Reddit could not be read from the build
+machine; the dArkOSen README, wiki, release notes and dArkOS RE's repository don't say it). What the code shows:
+
+- **It is a 30 FPS cap, not raw speed.** `djparentx/rk3326_core_builds_dArkOSen` got
+  `patches/ppsspp-patch-011-force-30fps.patch` on 2026-11-16: a "Force 30 FPS" PPSSPP option that holds a game's flips
+  to 30 a second (`sceDisplaySetFramebuf` delays the game's thread) and turns on the game's CWCheat named "30 FPS".
+  Both God of War games run with an unlocked frame rate, so capped at 30 the emulator has half the frames to run.
+- **Game and device:** the developer's own leftovers in the shipped ini are **Ghost of Sparta** (UCUS98737) on Vulkan,
+  1× resolution, frameskip off, and the 5.10 package ships only R46H device trees. Not Chains of Olympus, not a G80CA.
+- **dArkOS RE** (`southoz/dArkOSRE-R36`, last commit 2026-05): 4.4 kernel, PPSSPP 1.19.2 on OpenGL, `FrameSkip=1`,
+  `SkipBufferEffects=True`, `CPUSpeed=333`. No God of War or AI-agent claim in its README or wiki.
+- **PPSSPP has this cap built in for God of War.** `assets/compat.ini` has `[FramerateHack30]` with every God of War ID
+  commented out ("only an option for users with very weak hardware"); the hook `gow_fps_hack`
+  (`Core/HLE/ReplaceTables.cpp`) then waits two vblanks a frame instead of one. PPSSPP reads a user file after its
+  own: `PSP/SYSTEM/compat.ini`, on the owner's card `Saves/.config/ppsspp/PSP/SYSTEM/compat.ini`.
+  **`tools/ppsspp-vk/compat.ini` is that file**, and it works with every PPSSPP build, spruce's included (needs
+  `FunctionReplacements = True`, spruce's default). No patched binary is needed for God of War.
+- **dArkOSen's setup otherwise:**
+  - PPSSPP **1.20.4**, clang 19, `-Ofast -march=armv8-a+crc -mtune=cortex-a35`, `VK_KHR_display`; launched with
+    `nice -n -19` after `perfmax` (CPU, GPU and DMC governors as the system's governor setting says).
+  - Their Vulkan ini: `GraphicsBackend=3`, `InternalResolution=1`, `FrameSkip=0`, `AutoFrameSkip=False`,
+    `SkipGPUReadbackMode=1`, `DepthRasterMode=2`, `HighQualityDepth=0`, `TextureBackoffCache=True`, `BloomHack=3`,
+    `SplineBezierQuality=0`, `AnisotropyLevel=0`, `InflightFrames=3`, `RenderDuplicateFrames=False`,
+    `VerticalSync=False`, `LowLatencyPresent=True`, `CPUSpeed=0`. Their OpenGL default has `FrameSkip=2` with
+    `AutoFrameSkip=True`.
+  - **Their default CPU cap is 1296 MHz** (`etc/cpu-settings.conf`); 1512 MHz is opt-in. GPU 600 MHz at 1.1375 V is
+    in their G80CA device tree. DMC: 528 / 666 MHz, with 786 MHz disabled on every clone, G80CA included.
+  - zram: lzo 512 MB (the README says 768 MB); the newer `ppsspp.sh` adds lz4 1 GB when none is active. No sysctl,
+    scheduler or IRQ tuning.
+- So the owner's unit can match all of it except the opt-in CPU clocks.
 
 ## 5. Work items, in the order the previous session would take them
 
 ### A. Measure first (the owner can only run apps)
-1. **Build a diagnostics spruce app** ("LightMoss Report"), shipped like LightMoss Kernel: `board/r36s/spruce-app/*`,
-   installed by `rootfs-overlay/usr/libexec/lightmoss/spruce-app` and given an icon in `post-build.sh`. It should write
-   to the SD card:
-   - `uname -a`, `/proc/cmdline`;
-   - the `dmesg` lines for pvtm / bin-scale / leakage / opp / mali / dmc;
-   - cpufreq, GPU devfreq and DMC states and their `trans_stat`;
-   - thermal zones and the journal of the previous boot.
-   This gives you the chip grade and real behaviour without SSH. `lightmoss-debug` on BOOT already exports logs, but on
-   an eMMC install it needs SSH to create.
-2. **Measure the real CPU speed.** Time a fixed-cycle busy loop (or `openssl speed` / a small C kernel) at each
-   `scaling_max_freq`; real MHz is the ratio. Confirm the 1248/1296 cap on the owner's unit.
-3. **Profile PPSSPP while GoW runs:**
-   - per-thread CPU with `top -H`: is the emu (JIT) thread pegged at 100% of one core?
-   - PPSSPP's own frame-time / debug overlays;
-   - if needed, `perf` (check `CONFIG_PERF_EVENTS` in the 5.10 config, add a perf binary to a test build).
-   - Watch temperatures and clocks for thermal throttling (70 °C trip).
+1. **The diagnostics app exists: "LightMoss Report"** (`board/r36s/spruce-app/LightMossReport`,
+   `/usr/bin/lightmoss-report`; built 2026-11-21, **not yet run on the device**: ask the owner for its output first).
+   It writes to `LightMoss-Report` on the spruce card:
+   - *a report now*: `report.txt` (kernel, cmdline, the kernel-log lines for pvtm / bin / leakage / scale / opp / mali /
+     dmc, cpufreq and devfreq states with `time_in_state` and `trans_stat`, regulators, thermal zones, the GPU driver,
+     the PPSSPP / Flycast / N64 settings on the card, hardware), `kernel.log`, `previous-boot.log`;
+   - *the CPU speed test* inside it: at each cpufreq step, the rate the APLL is really programmed to, decoded from the
+     PX30 CRU registers through `/dev/mem` (the clock framework lies here too: the PLL's `recalc_rate` returns the
+     requested rate while a scale is active), and a timed loop as a second opinion;
+   - *the game recorder* (`lightmoss-report watch`): 10 minutes next to a game, every 5 s the real CPU clock, GPU and
+     DMC clocks and loads, temperatures, per-core busy time and the threads that use the CPU. With `dmc-performance`
+     (the app asks) it holds the DMC governor at `performance` meanwhile, for an A/B.
+2. **Read the first report for:** the chip's PVTM level and scale; the real MHz at each step (expected 1248–1296 at
+   the top); the owner's `FrameSkip` / `AutoFrameSkip` (§4.3); which PPSSPP binary is on the card (sha256).
+3. **Read a game recording for:** an emulator thread near 100% of a core (CPU-bound) against the GPU's load near 100%
+   at 520 MHz (GPU-bound); the DMC dropping below 666 MHz in play (5.10 runs `dmc_ondemand` with `auto-freq-en`,
+   328–666 MHz, and spruce's G350 profile doesn't manage the DMC; its Miniloong profile does, with `DRAM_*` variables);
+   temperatures against the 70 °C trip. `perf` would need `CONFIG_PERF_EVENTS` (`clone_defconfig` doesn't name it; check the built
+   config) and a perf binary; the PMU node is in `px30.dtsi`.
 4. **Make a repeatable benchmark:** a GoW savestate at a heavy scene, 60 s, the same for Ridge Racer. Ask the owner to
    make the savestates.
    - Run with **frame skipping Off and Auto FrameSkip off**, and the counter set to show both FPS and speed. A skipped
@@ -203,6 +224,8 @@ LightMoss is a buildroot 2025.11.3 system that **impersonates a dArkMoss base**,
    - Record every result with its settings and backend.
 
 ### B. PSP / PPSSPP (the main goal)
+0. **First: the 30 FPS cap** (§4.5). The owner copies `tools/ppsspp-vk/compat.ini` to the card and reports the counter
+   with frame skipping off, on Vulkan. Then the sweep below.
 1. **Settings sweep on GoW** (Vulkan and OpenGL), one change at a time:
    - software skinning **off** (moves skinning from the weak CPU to the GPU; likely big for GoW);
    - lazy texture caching on;
@@ -217,9 +240,13 @@ LightMoss is a buildroot 2025.11.3 system that **impersonates a dArkMoss base**,
 
    Settle on a per-game config (PPSSPP game settings) that the owner can use, and a recommended `ppsspp.ini` for the
    R36S under 5.10.
-2. **Newer PPSSPP:** rebuild with `tools/ppsspp-vk/build.sh` at 1.20.4 (what dArkOSen ships) and at current `master`;
-   ARM64 JIT and vertex-decoder work lands often. Bump `PPSSPP_VERSION`/`PPSSPP_COMMIT` and check that spruce's patches
-   still apply.
+2. **Newer PPSSPP:**
+   - **1.20.4 is built** (`PPSSPP_VERSION=v1.20.4 PPSSPP_COMMIT=fa50bb19… tools/ppsspp-vk/build.sh`; spruce's patches
+     apply unchanged): `PPSSPPSDL_dArkMoss3326_vk_v1.20.4`, sha256 `b550358e…`. With `FORCE30FPS=1` the script adds
+     dArkOSen's patch 011 (it applies cleanly): `…_v1.20.4_f30`, for games other than God of War that have a "30 FPS"
+     cheat. Neither has run on the device yet.
+   - **`master` is not a version bump:** PPSSPP moved to SDL3 and reorganised `SDL/` (no `SDLVulkanGraphicsContext.cpp`),
+     so spruce's patches fail and the Flip toolchain's sysroot has no SDL3. A port, not worth it before measurements.
 3. **Compiler wins, if profiling shows PPSSPP's own threads are the limit on the A35:**
    - **PGO**: build with `-fprofile-generate`, have the owner play the GoW benchmark, collect the `.gcda` files, rebuild
      with `-fprofile-use`. Often worth 5–15% on CPU-bound code. Needs a writable profile path on the SD card.
@@ -237,17 +264,19 @@ LightMoss is a buildroot 2025.11.3 system that **impersonates a dArkMoss base**,
    (test `/run/lightmoss/mali_icd.json` or a working `libvulkan` + ICD) and the OpenGL one otherwise, as spruce already
    does for its Mini V2 port. Write the change up for the owner with your measurements; don't push it anywhere.
 
-### C. GPU drivers
-1. **g29p1** is the newest rockchip Bifrost blob the previous session found. Look for newer libmali releases for
-   RK3326/PX30 (rockchip-linux `libmali`, JeffyCN mirrors) and check whether a newer one matches the 5.10 kernel's
-   kbase driver.
-2. **Panfrost / PanVK** (open-source Mesa) support the Mali-G31, but need the mainline `panfrost` kernel driver.
-   Practically that means a **mainline kernel** (ROCKNIX runs the R36S and other RK3326 handhelds on mainline + Panfrost).
-   - This is a big project: a third kernel option with its own device tree, joypad, panel and audio.
-   - First research and report back: what ROCKNIX gets for GoW/Ridge Racer/Flycast on RK3326, whether PanVK supports
-     Bifrost v7 well enough, and the cost. Don't start building it without the owner.
-3. **Vulkan presentation:** FIFO through VK_KHR_display. Check for pacing problems (frames dropped or waiting) on the
-   60 Hz panel, and for the "Panel 9" path.
+### C. GPU drivers (researched 2026-11-21: nothing to change)
+1. **g29p1 is the newest blob there is for the G31, and it is the kernel's exact match.** The 5.10 kernel's kbase is
+   `g29p1-12eac0` (`drivers/gpu/arm/bifrost/Kbuild`), UK 11.46, and the blob's own string is `g29p1-12eac0, rk_so_ver: 5`.
+   `bf621d15` is the head of JeffyCN's **`libmali-next`** branch (its `libmali` branch stops at g24p0 for the G31);
+   ROCKNIX pins the same blob. Watch that branch for a newer `rk_so_ver`.
+2. **Panfrost / PanVK: don't propose it for speed.** Mesa lists the G31 at Vulkan 1.3 since 26.3, but PanVK refuses
+   Bifrost v6/v7 without `PAN_I_WANT_A_BROKEN_VULKAN_DRIVER=1` ("not well-tested on v7"). ROCKNIX runs RK3326 on a
+   mainline kernel and still **defaults to libmali g29p1** there (out-of-tree kbase), with Panfrost a boot-time switch;
+   Arch R patches around a PanVK hang on the G31 and a DDR corruption from Panfrost devfreq. No published numbers show
+   Panfrost faster. The cost would be ROCKNIX's 27 kernel patches, its panel and joypad drivers and U-Boot.
+3. **Vulkan presentation:** the blob presents VK_KHR_display by legacy page flips (it imports `drmModePageFlip`, no
+   atomic calls). Whether MAILBOX / IMMEDIATE exist is unknown: ask the device (`vkGetPhysicalDeviceSurfacePresentModesKHR`,
+   or PPSSPP's Vulkan info screen). Untested knobs: kbase `power_policy=always_on`.
 
 ### D. Dreamcast (Flycast)
 - spruce on the R36S defaults to **Flycast standalone 2.7** (`Emu/DC/flycast`, option `Emulator_DARKMOSS`).
@@ -307,8 +336,9 @@ Only keep what measurably helps.
   limit is unmeasured until frameskip is off. "30 FPS" as dArkOS RE reports it presumably means 30/30 at 100%: every
   frame drawn at full speed. Find out how they measured it.
 - **The CPU unlock** (~20% more CPU) failed on this unit anyway. Realistic levers are PPSSPP's rendering settings, a
-  newer or PGO-built PPSSPP, GPU and memory throughput if rendering turns out to be the limit, and whatever dArkOS RE
-  actually did.
+  newer or PGO-built PPSSPP, GPU and memory throughput if rendering turns out to be the limit, and what dArkOSen
+  actually did: cap God of War at 30 frames a second (§4.5).
+- **There is no better GPU driver to move to** (§5.C).
 
 ## 7. Building, testing, shipping
 - **CI is the build.** `.github/workflows/build.yml` builds both boards on every push except Markdown-only changes;

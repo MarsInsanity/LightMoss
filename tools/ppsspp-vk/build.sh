@@ -23,6 +23,13 @@
 #   PPSSPP_VERSION=v1.20.4 PPSSPP_COMMIT=fa50bb1976065c4f8b1b47af227d367fe9771555 tools/ppsspp-vk/build.sh
 #   PPSSPP_VERSION=master PPSSPP_COMMIT=<commit> tools/ppsspp-vk/build.sh
 # EXTRA_CFLAGS is added to the compiler flags (and to the link, for -fprofile-*).
+# FORCE30FPS=1 adds dArkOSen's "Force 30 FPS" option (djparentx, written for v1.20.4;
+# off until set in Settings > Graphics or a game's settings, "Force30FPS" in the ini):
+# it holds a game's flips to 30 a second (sceDisplaySetFramebuf delays the game's
+# thread, as PPSSPP's own ForceMax60FPS does at 60) and turns on the game's CWCheat
+# named "30 FPS" when its cheat file or PSP/Cheats/cheat.db has one. A game that runs
+# unlocked, as God of War does, then asks for half the frames. The output is named _f30.
+#   FORCE30FPS=1 PPSSPP_VERSION=v1.20.4 PPSSPP_COMMIT=fa50bb1976065c4f8b1b47af227d367fe9771555 tools/ppsspp-vk/build.sh
 # Keep WORK outside the LightMoss checkout. The build sent to the owner in November 2026
 # (PPSSPPSDL_dArkMoss3326_vk, v1.20.3) had sha256
 # 5c8b57d4eb07dab32cdb44c99380bef68548e0fa30bb72b9a8207ec2be72c029.
@@ -35,6 +42,9 @@ JOBS="${JOBS:-$(nproc)}"
 PPSSPP_VERSION="${PPSSPP_VERSION:-v1.20.3}"
 PPSSPP_COMMIT="${PPSSPP_COMMIT:-d357e6a32934800d3d80b49f910a603e1b069751}"      # tag v1.20.3
 EXTRA_CFLAGS="${EXTRA_CFLAGS:-}"
+FORCE30FPS="${FORCE30FPS:-}"
+DARKOSEN_REPO="https://github.com/djparentx/rk3326_core_builds_dArkOSen"
+DARKOSEN_REV="7f2278bfa85d4ba80ed82303e9f4c84a7a10d6a0"         # main, 2026-11-21
 SPRUCE_REPO="https://github.com/spruceUI/PPSSPP-spruce"
 SPRUCE_REV="e193c9a1d4aca6bbce927012b4e175f422ad6378"          # main, 2026-11-14
 TOOLCHAIN_URL="https://github.com/steward-fu/website/releases/download/miyoo-flip/flip-toolchain-v1.0.tar.gz"
@@ -48,6 +58,7 @@ if [ "$PPSSPP_VERSION" != v1.20.3 ]; then
     SRC="$SRC-$PPSSPP_VERSION"
     BUILD="$BUILD-$PPSSPP_VERSION"
 fi
+[ -n "$FORCE30FPS" ] && NAME="${NAME}_f30"
 NAME="${NAME}${NAME_SUFFIX:-}"
 
 TC="$WORK/toolchain"
@@ -117,6 +128,12 @@ for patch in "$PATCHES"/darkmoss/*.py; do
     python3 "$patch" && echo "Applied: $(basename "$patch")"
 done
 python3 "$PATCHES/pvr/vulkan-display-fallback.py" && echo "Applied: vulkan-display-fallback.py"
+if [ -n "$FORCE30FPS" ]; then
+    DARKOSEN="$WORK/rk3326_core_builds_dArkOSen"
+    [ -d "$DARKOSEN/.git" ] || git clone -q --filter=blob:none --no-checkout "$DARKOSEN_REPO" "$DARKOSEN"
+    git -C "$DARKOSEN" show "$DARKOSEN_REV:patches/ppsspp-patch-011-force-30fps.patch" | git apply -
+    echo "Applied: dArkOSen ppsspp-patch-011-force-30fps.patch"
+fi
 
 # --- 5. CMake toolchain file, identical to the one Dockerfile.darkmoss3326 writes.
 TCFILE="$WORK/flip-toolchain.cmake"
