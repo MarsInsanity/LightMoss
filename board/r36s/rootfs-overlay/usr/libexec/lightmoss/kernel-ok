@@ -1,0 +1,42 @@
+#!/bin/sh
+# The 5.10 kernel got to spruce: clear boot.ini's try marker.
+#
+# boot.ini starts the optional 5.10 kernel only after writing
+# lightmoss-kernel-5.10-trying on BOOT, and starts 4.4 instead whenever that
+# marker is already there: a 5.10 start that never got this far is not tried
+# again by itself (the LightMoss Kernel app in spruce says so and offers
+# another try). This removes the marker once spruce is up on 5.10: its boot
+# jobs have started (after its first frame: /tmp/spruce_boot_jobs_started)
+# and spruce-launch.service has kept running for 20 s more. If spruce is not
+# up after 10 minutes, the device restarts, into 4.4, so a 5.10 that starts
+# but never shows spruce falls back without anyone holding the power key.
+# lightmoss-kernel-ok.service runs it on 5.10 starts with the marker there;
+# the boot does not wait for it.
+set -u
+T=/boot/lightmoss-kernel-5.10-trying
+MARK="${LM_KERNEL_OK_MARK:-/tmp/spruce_boot_jobs_started}"
+WAIT="${LM_KERNEL_OK_WAIT:-600}"
+STEP=2
+STABLE=20
+
+log() { echo "lightmoss-kernel-ok: $*"; }
+
+[ -e "$T" ] || exit 0
+n=0; up=0
+while [ "$n" -lt "$WAIT" ]; do
+	if [ -d "$MARK" ] && [ "$(systemctl show -P ActiveState spruce-launch.service 2>/dev/null)" = active ]; then
+		up=$((up + STEP))
+	else
+		up=0
+	fi
+	if [ "$up" -ge "$STABLE" ]; then
+		rm -f "$T" && sync
+		log "spruce is up on $(uname -r): the 5.10 kernel stays chosen"
+		exit 0
+	fi
+	sleep "$STEP"
+	n=$((n + STEP))
+done
+log "spruce did not come up on $(uname -r) within $WAIT s: restarting, into 4.4"
+sync
+systemctl reboot

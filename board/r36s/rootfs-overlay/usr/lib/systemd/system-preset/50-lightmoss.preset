@@ -4,6 +4,7 @@ enable lightmoss-boot.service
 enable lightmoss-firstboot.service
 enable lightmoss-debug.service
 enable lightmoss-ledtest.service
+enable lightmoss-kernel-ok.service
 enable spruce-launch.service
 enable hpjackd.service
 enable NetworkManager.service

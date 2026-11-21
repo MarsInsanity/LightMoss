@@ -1,22 +1,26 @@
 #!/bin/sh
-# Before spruce starts: put the LightMoss Update app on the spruce card
-# (App/LightMossUpdate), or bring it up to date. LightMoss ships it, so the
-# card always has the one that knows how this LightMoss updates. Files are
-# only written when they differ. Also removes the image a finished update
-# left at the root of the card (LightMoss.rkimg.done, 50 MB or so).
-SRC=/usr/share/lightmoss/spruce-app/LightMossUpdate
+# Before spruce starts: put LightMoss's spruce apps on the spruce card
+# (App/LightMossUpdate, App/LightMossKernel), or bring them up to date.
+# LightMoss ships them, so the card always has the ones that know how this
+# LightMoss updates and which kernels it has. Files are only written when
+# they differ. Also removes the image a finished update left at the root of
+# the card (LightMoss.rkimg.done, 50 MB or so).
+SRC=/usr/share/lightmoss/spruce-app
 APPS=/mnt/SDCARD/App
-DST="$APPS/LightMossUpdate"
 
 mountpoint -q /mnt/SDCARD || exit 0
 [ -d "$APPS" ] || exit 0
 
 changed=0
-mkdir -p "$DST" || exit 0
-for f in "$SRC"/*; do
-	n="${f##*/}"
-	cmp -s "$f" "$DST/$n" && continue
-	cp -f "$f" "$DST/$n" && changed=1
+for app in "$SRC"/*/; do
+	app="${app%/}"
+	DST="$APPS/${app##*/}"
+	mkdir -p "$DST" || continue
+	for f in "$app"/*; do
+		n="${f##*/}"
+		cmp -s "$f" "$DST/$n" && continue
+		cp -f "$f" "$DST/$n" && changed=1
+	done
 done
 
 if [ -f /mnt/SDCARD/LightMoss.rkimg.done ]; then
