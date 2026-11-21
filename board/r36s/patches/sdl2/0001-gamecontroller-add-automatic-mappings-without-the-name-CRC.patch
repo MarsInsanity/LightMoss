@@ -1,0 +1,43 @@
+From: LightMoss <noreply@github.com>
+Subject: [PATCH] gamecontroller: add automatic mappings without the name CRC
+
+When SDL opens a joystick it has no mapping for, it makes one from the
+device's evdev buttons and adds it with the CRC of the device's name
+("crc:xxxx"). A mapping with the device's CRC is an exact match, which
+SDL_PrivateMatchControllerMappingForGUID returns before any mapping
+without a CRC. So a mapping added later without one, whatever its
+priority, never applies to that device: in particular a
+gamecontrollerdb.txt row that a program loads after SDL_Init, when the
+joysticks present have already been added (SDL_PrivateJoystickAdded
+calls SDL_IsGameController, which makes the automatic mapping).
+
+That is how PPSSPP loads its database, and on the R36S clone the
+automatic mapping of the "GO-Super Gamepad" has no back, start, guide
+or stick buttons (BTN_TRIGGER_HAPPY1-5), so PPSSPP saw neither Select
+nor Start and could not bind them, while its database row for the pad
+has them. dArkMoss, whose behaviour spruce is written for, builds SDL
+with the controller code from before the CRC change, where the row
+replaces the automatic mapping.
+
+Add the automatic mapping without the CRC, so that a later mapping for
+the device's GUID replaces it as before. Mappings that carry a CRC
+themselves (from a GUID string with one, or "crc:" in the mapping) are
+matched as before.
+
+diff --git a/src/joystick/SDL_gamecontroller.c b/src/joystick/SDL_gamecontroller.c
+index 36e521e..bc17807 100644
+--- a/src/joystick/SDL_gamecontroller.c
++++ b/src/joystick/SDL_gamecontroller.c
+@@ -1462,6 +1462,12 @@ static ControllerMapping_t *SDL_PrivateGenerateAutomaticControllerMapping(const
+     SDL_PrivateAppendToMappingString(mapping, sizeof(mapping), "righttrigger", &raw_map->righttrigger);
+     SDL_PrivateAppendToMappingString(mapping, sizeof(mapping), "touchpad", &raw_map->touchpad);
+ 
++    /* Add the automatic mapping without the device name's CRC. With it, the
++     * mapping is an exact match that beats every mapping added later without
++     * a CRC (a gamecontrollerdb.txt row, which a program loads after
++     * SDL_Init, when SDL has already made this one), whatever its priority.
++     * Without it, such a mapping replaces this one, as before SDL 2.26. */
++    SDL_SetJoystickGUIDCRC(&guid, 0);
+     return SDL_PrivateAddMappingForGUID(guid, mapping, &existing, SDL_CONTROLLER_MAPPING_PRIORITY_DEFAULT);
+ }
+ 
