@@ -1,6 +1,6 @@
 #!/bin/sh
 # lightmoss-report [now]
-# lightmoss-report watch [SECONDS]
+# lightmoss-report watch [SECONDS [dmc-performance]]
 #
 # Writes how this R36S runs to LightMoss-Report on the spruce card, where a PC
 # can read it: the LightMoss Report app in spruce runs both forms, so nothing
@@ -15,7 +15,11 @@
 #          seconds for SECONDS (default 600) of the clocks, temperatures, how
 #          busy each CPU core, the GPU and the memory controller are, and
 #          which threads use the CPU. Started before a game, it shows what
-#          limits that game.
+#          limits that game. With "dmc-performance" the memory controller's
+#          governor is "performance" while it records (the top step of the
+#          kernel's table, where dmc_ondemand moves between steps by load),
+#          and is put back afterwards: record a game both ways to see whether
+#          the memory clock holds it back.
 #
 # The CPU speed test: cpufreq's numbers are what was asked for, not what the
 # CPU runs at. Rockchip's kernels cap the CPU PLL by the chip's grade
@@ -169,8 +173,19 @@ watch() {
 	_out="$DIR/watch-$STAMP.txt"
 	_state=/tmp/lightmoss-report.$$
 	: > "$_state"
+	_dmc=/sys/class/devfreq/dmc
+	_note="the system as it is"
+	if [ "${2:-}" = dmc-performance ] && [ -w "$_dmc/governor" ]; then
+		_dmcgov=$(cat "$_dmc/governor")
+		if echo performance > "$_dmc/governor" 2>/dev/null; then
+			trap 'echo "$_dmcgov" > "$_dmc/governor"' EXIT
+			trap 'exit 0' INT TERM
+			_note="memory controller governor performance (it was $_dmcgov)"
+		fi
+	fi
 	{
 		echo "LightMoss $(sed -n 's/^LIGHTMOSS_VERSION="\(.*\)"/\1/p' /etc/os-release), kernel $(uname -r), $(date 2>/dev/null)"
+		echo "Recorded with: $_note."
 		echo "One sample every $STEP s for $_total s. busy: each core's busy time. threads: process/thread=share of one core@core it last ran on."
 		echo "A thread near 100% is what limits a game; the GPU's load is how busy the GPU is at its current clock."
 		echo
@@ -405,9 +420,9 @@ STAMP=$(date +%Y%m%d-%H%M%S 2>/dev/null) || STAMP=unknown
 
 case "${1:-now}" in
 now) now ;;
-watch) watch "${2:-600}" ;;
+watch) watch "${2:-600}" "${3:-}" ;;
 *)
-	echo "usage: lightmoss-report [now | watch [SECONDS]]" >&2
+	echo "usage: lightmoss-report [now | watch [SECONDS [dmc-performance]]]" >&2
 	exit 2
 	;;
 esac

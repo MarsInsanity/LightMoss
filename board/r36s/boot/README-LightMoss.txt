@@ -60,9 +60,12 @@ B, then A: the game recorder. For the next 10 minutes it notes, every 5
    are and which threads use the CPU. Start it, then start a game right away
    and play for a few minutes: the watch-<date>-<time>.txt it leaves shows
    what limits that game (one thread at 100%: the CPU; the GPU's load near
-   100%: the GPU).
+   100%: the GPU). It asks whether to also hold the memory clock at its top
+   speed while it records (B): record the same game both ways and compare
+   its speed to see whether the memory clock holds it back.
 
-Over SSH: "lightmoss-report" and "lightmoss-report watch 600".
+Over SSH: "lightmoss-report" and "lightmoss-report watch 600" (or
+"lightmoss-report watch 600 dmc-performance").
 
 SSH
 ---

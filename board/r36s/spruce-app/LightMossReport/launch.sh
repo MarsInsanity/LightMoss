@@ -10,7 +10,8 @@
 #   The game recorder: for the next 10 minutes, every 5 seconds, the clocks,
 #   temperatures, how busy each CPU core and the GPU are, and which threads
 #   use the CPU. Started here, it keeps running while a game is played, and
-#   shows what limits that game.
+#   shows what limits that game. It can hold the memory clock at its top
+#   speed while it records, to test whether that makes a game faster.
 #
 # LightMoss ships this app and puts it on the spruce card at every start
 # (/usr/libexec/lightmoss/spruce-app), so edits made here are overwritten.
@@ -50,12 +51,15 @@ if systemctl is-active --quiet "$UNIT.service" 2>/dev/null; then
 	exit 0
 fi
 
-show "Game recorder: for the next 10 minutes it notes the clocks, temperatures and what uses the CPU, to show what limits a game.\n\nPress A to start it, then start the game right away and play for a few minutes. Press B to cancel."
+show "Game recorder: for the next 10 minutes it notes the clocks, temperatures and what uses the CPU, to show what limits a game. Start it, then start the game right away and play for a few minutes.\n\nPress A to continue, or B to cancel."
 confirm || exit 0
+show "Press A to record with the system as it is.\n\nPress B to also hold the memory clock at its top speed while recording: a test of whether that makes the game faster (it goes back to normal afterwards)."
+MODE=""
+confirm || MODE=dmc-performance
 # Its own unit, so it outlives this app and runs next to the game.
-systemd-run --quiet --collect --unit="$UNIT" "$REPORT" watch "$SECONDS_TO_WATCH" 2>/dev/null ||
-	{ setsid "$REPORT" watch "$SECONDS_TO_WATCH" > /dev/null 2>&1 & }
-log_message "LightMoss Report: recording for $SECONDS_TO_WATCH s"
+systemd-run --quiet --collect --unit="$UNIT" "$REPORT" watch "$SECONDS_TO_WATCH" $MODE 2>/dev/null ||
+	{ setsid "$REPORT" watch "$SECONDS_TO_WATCH" $MODE > /dev/null 2>&1 & }
+log_message "LightMoss Report: recording for $SECONDS_TO_WATCH s${MODE:+ ($MODE)}"
 show "Recording for 10 minutes. Start the game now.\n\nAfterwards the recording is a watch file in LightMoss-Report on the SD card."
 sleep 5
 exit 0

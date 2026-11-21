@@ -201,7 +201,11 @@ PLL is programmed to from its registers (PX30 CRU, through `/dev/mem`) at each
 cpufreq step, and times a loop at each as a second opinion. *The game
 recorder* (`lightmoss-report watch`) runs for 10 minutes next to a game and
 notes, every 5 seconds, the clocks, temperatures, each core's and the GPU's
-load and the threads that use the CPU: what limits that game.
+load and the threads that use the CPU: what limits that game. Asked to
+(`watch 600 dmc-performance`), it holds the memory controller's governor at
+`performance` while it records, where `dmc_ondemand` moves between 328 and
+666 MHz by load (5.10; as dArkOSen's `perfmax` does for games), and puts it
+back afterwards: a test of whether the memory clock holds a game back.
 
 ## Boot time
 
