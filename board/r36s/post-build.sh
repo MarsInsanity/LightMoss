@@ -106,3 +106,20 @@ mkdir -p "$TARGET_DIR/var/log/journal"
 
 # --- where spruce lives ---------------------------------------------------------------
 mkdir -p "$TARGET_DIR/mnt/SDCARD" "$TARGET_DIR/boot"
+
+# --- the Mali g29p1 blobs, byte for byte ----------------------------------------------
+# rk3326-mali checks them when it installs them (the armhf one after its
+# program-header fix); nothing after that may change them, buildroot's strip
+# included (BR2_STRIP_EXCLUDE_DIRS). Fail the build rather than ship a blob
+# that is not the one checked.
+g29p1_check() {
+	[ -e "$TARGET_DIR/$1" ] || return 0
+	echo "$2  $TARGET_DIR/$1" | sha256sum -c --quiet - || {
+		echo "post-build: $1 is not the checked g29p1 blob" >&2
+		exit 1
+	}
+}
+g29p1_check usr/lib/mali-g29p1/libmali-bifrost-g31-g29p1.so \
+	9a931238bf5dd65d58e30bc92d6ab4e8417f858b5778dc2fb7fb6430dc7d3b83
+g29p1_check usr/lib/arm-linux-gnueabihf/mali-g29p1/libmali-bifrost-g31-g29p1.so \
+	92455f88319628cb4623564c6dadcc3024123e8ae245eea7e8e13721efa87595

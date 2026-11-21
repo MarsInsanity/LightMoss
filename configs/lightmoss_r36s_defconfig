@@ -77,7 +77,7 @@ BR2_PACKAGE_RK3326_MALI=y
 # strip is kept off the blobs, whose bytes are checked.
 BR2_PACKAGE_LIGHTMOSS_LINUX510=y
 BR2_PACKAGE_RK3326_MALI_G29P1=y
-BR2_STRIP_EXCLUDE_DIRS="/usr/lib/mali-g29p1 /usr/lib/arm-linux-gnueabihf/mali-g29p1"
+BR2_STRIP_EXCLUDE_DIRS="usr/lib/mali-g29p1 usr/lib/arm-linux-gnueabihf/mali-g29p1"
 # The 32-bit (armhf) runtime, from configs/lightmoss_r36s_lib32_defconfig.
 BR2_PACKAGE_LIGHTMOSS_LIB32=y
 BR2_PACKAGE_ALSA_LIB=y
