@@ -36,7 +36,7 @@ anything. Facts here were checked against the code and the device; where somethi
 | Release | **v0.3.8** (2026-11-21). |
 | Kernels | 4.4 (default) and the optional BSP **5.10** with Vulkan, chosen in the **LightMoss Kernel** spruce app. |
 | 5.10 on the owner's unit | Starts and runs stably at Rockchip's CPU speeds; Vulkan works in PPSSPP. |
-| PSP on Vulkan (owner-installed build, §4.2) | Ridge Racer: clearly faster than OpenGL, which ran ~42/60 with stutter. **God of War: Chains of Olympus: ~10/30 FPS, the same on OpenGL and Vulkan**, so it's CPU-bound. |
+| PSP on Vulkan (owner-installed build, §4.2) | Ridge Racer: clearly faster than OpenGL, which ran ~42/60 with stutter. **God of War: Chains of Olympus shows "10/30 (100%)" on both OpenGL and Vulkan: full speed, but only 10 of the game's 30 frames drawn.** That's most likely frame skipping; the real rendering speed is still unmeasured (§4.3). |
 | CPU overclock | Tried three ways (§3.3); froze the owner's unit every time. Removed in v0.3.8. **Don't bring it back by default.** |
 | Controls | Fixed for PPSSPP on the R36S (v0.3.3 SDL patch plus a corrected button file, §4.4). |
 
@@ -139,9 +139,20 @@ LightMoss is a buildroot 2025.11.3 system that **impersonates a dArkMoss base**,
 
 ### 4.3 What the owner measured
 - **Ridge Racer:** OpenGL ~42/60 with frame skips and lag spikes; Vulkan noticeably smoother (no number yet).
-- **God of War: Chains of Olympus:** ~10/30 FPS on both backends. A faster GPU path can't help that; the time goes on
-  the CPU side (the PSP CPU JIT, vertex/texture decode, and draw submission).
-- **Not yet tried by the owner:** frameskip, lazy texture caching, skip buffer effects, or software skinning off.
+- **God of War: Chains of Olympus:** PPSSPP's counter shows **"10/30 (100%)"** on both backends.
+- **How to read that counter** (`UI/DebugOverlay.cpp` `DrawFPS`, `Core/HW/Display.cpp`, `Core/HLE/sceDisplay.cpp`):
+  - The format is `actual_fps/fps (speed%)`.
+  - `fps` (30) counts the game's own flips per second.
+  - `actual_fps` (10) counts only flips that show a newly drawn framebuffer (`DisplayFireActualFlip()` runs when
+    `FramebufferReallyDirty()`); frames skipped by frameskip don't count.
+  - Speed is emulated vblanks against 59.94 Hz.
+- So the game runs at **full speed** and PPSSPP **draws only one frame in three**. With spruce's default `FrameSkip = 0`,
+  auto frameskip can't skip anything (`doFrameSkip` is false in `DoFrameTiming()`). The owner's card therefore most
+  likely has frame skipping set; a *fixed* frameskip of 2 shows exactly 10/30 however fast the device is.
+- **The same 10/30 on OpenGL and Vulkan therefore proves nothing**, and the previous session's "CPU-bound" conclusion
+  was premature. First job: measure with frame skipping **off** and auto frameskip **off** on both backends (§5.A.4).
+  The counter then shows drawn frames and the speed the device really reaches, for example "18/18 (60%)".
+- **Not yet tried by the owner:** lazy texture caching, skip buffer effects, or software skinning off.
 
 ### 4.4 Controls (done; don't redo)
 - **Start/Select:** missing in PPSSPP because SDL 2.32's automatic, CRC-tagged mapping beat PPSSPP's database row for
@@ -184,8 +195,12 @@ LightMoss is a buildroot 2025.11.3 system that **impersonates a dArkMoss base**,
    - PPSSPP's own frame-time / debug overlays;
    - if needed, `perf` (check `CONFIG_PERF_EVENTS` in the 5.10 config, add a perf binary to a test build).
    - Watch temperatures and clocks for thermal throttling (70 °C trip).
-4. **Make a repeatable benchmark:** a GoW savestate at a heavy scene, 60 s, average/min FPS from PPSSPP's counter, the
-   same for Ridge Racer. Ask the owner to make the savestates. Record every result with its settings.
+4. **Make a repeatable benchmark:** a GoW savestate at a heavy scene, 60 s, the same for Ridge Racer. Ask the owner to
+   make the savestates.
+   - Run with **frame skipping Off and Auto FrameSkip off**, and the counter set to show both FPS and speed. A skipped
+     frame isn't rendered, so frameskip hides the real cost.
+   - Read the result as drawn frames and speed (§4.3); "30/30 (100%)" is the goal.
+   - Record every result with its settings and backend.
 
 ### B. PSP / PPSSPP (the main goal)
 1. **Settings sweep on GoW** (Vulkan and OpenGL), one change at a time:
@@ -205,7 +220,7 @@ LightMoss is a buildroot 2025.11.3 system that **impersonates a dArkMoss base**,
 2. **Newer PPSSPP:** rebuild with `tools/ppsspp-vk/build.sh` at 1.20.4 (what dArkOSen ships) and at current `master`;
    ARM64 JIT and vertex-decoder work lands often. Bump `PPSSPP_VERSION`/`PPSSPP_COMMIT` and check that spruce's patches
    still apply.
-3. **Compiler wins for a CPU-bound A35:**
+3. **Compiler wins, if profiling shows PPSSPP's own threads are the limit on the A35:**
    - **PGO**: build with `-fprofile-generate`, have the owner play the GoW benchmark, collect the `.gcda` files, rebuild
      with `-fprofile-use`. Often worth 5–15% on CPU-bound code. Needs a writable profile path on the SD card.
    - `-O2` vs `-Ofast`, LTO (already on), `-mcpu=cortex-a35 -mtune=cortex-a35`.
@@ -213,6 +228,11 @@ LightMoss is a buildroot 2025.11.3 system that **impersonates a dArkMoss base**,
 4. **Memory clock:** test the DMC governor at `performance` while PPSSPP runs. It stays at 666 MHz while 786 MHz is
    disabled. Enabling 786 MHz (or arkos4clone's 924/1032 MHz) is a memory overclock: **opt-in only**, with the owner's
    agreement, and their unit has already failed CPU overclocks.
+   - If rendering turns out to be the limit, the **GPU clock** matters too. dArkOSen runs the Mali at 600 MHz; this
+     kernel's `rk3326-oc.dtsi` has a 600 MHz OPP at 1.175 V.
+   - The GPU is on `vdd_logic`, not `vdd_arm`, so the failed CPU overclock says little about it.
+   - It's still an **opt-in** experiment, and spruce's G350 profile caps the GPU at 520 MHz in every mode
+     (`GPU_*_MAX_FREQ`), so it also needs that raised (a spruce change).
 5. **Deliverable for spruce:** spruce's G350 profile should use a Vulkan-capable 3326 PPSSPP build when Vulkan exists
    (test `/run/lightmoss/mali_icd.json` or a working `libvulkan` + ICD) and the OpenGL one otherwise, as spruce already
    does for its Mini V2 port. Write the change up for the owner with your measurements; don't push it anywhere.
@@ -283,8 +303,12 @@ Only keep what measurably helps.
 - **The CPU overclock isn't for this unit**, and stays out of the default.
 - **Dreamcast:** Flycast is Vulkan-ready; it's a setting plus spruce-side selection.
 - **N64:** no useful Vulkan path on this GPU.
-- **GoW at 30 FPS:** a ~20% CPU gain wouldn't reach it. Realistic levers are PPSSPP settings (frameskip, speed hacks),
-  a newer or PGO-built PPSSPP, and whatever dArkOS RE actually did (find out).
+- **GoW's "10/30 (100%)"** means full speed with two of every three frames skipped, not a 10 FPS device limit. The real
+  limit is unmeasured until frameskip is off. "30 FPS" as dArkOS RE reports it presumably means 30/30 at 100%: every
+  frame drawn at full speed. Find out how they measured it.
+- **The CPU unlock** (~20% more CPU) failed on this unit anyway. Realistic levers are PPSSPP's rendering settings, a
+  newer or PGO-built PPSSPP, GPU and memory throughput if rendering turns out to be the limit, and whatever dArkOS RE
+  actually did.
 
 ## 7. Building, testing, shipping
 - **CI is the build.** `.github/workflows/build.yml` builds both boards on every push except Markdown-only changes;
