@@ -17,6 +17,12 @@
 #
 # Usage: tools/ppsspp-vk/build.sh   (work dir $HOME/ppsspp-vk, ~6 GB; output in $WORK/out)
 #   WORK=/path OUT=/path tools/ppsspp-vk/build.sh
+# Another PPSSPP than v1.20.3 (its source, build and output get the version in their
+# names): a tag with the commit it must point at, or a branch's commit, which is fetched
+# by itself (PPSSPP then calls itself by that commit, there being no tag to describe it):
+#   PPSSPP_VERSION=v1.20.4 PPSSPP_COMMIT=fa50bb1976065c4f8b1b47af227d367fe9771555 tools/ppsspp-vk/build.sh
+#   PPSSPP_VERSION=master PPSSPP_COMMIT=<commit> tools/ppsspp-vk/build.sh
+# EXTRA_CFLAGS is added to the compiler flags (and to the link, for -fprofile-*).
 # Keep WORK outside the LightMoss checkout. The build sent to the owner in November 2026
 # (PPSSPPSDL_dArkMoss3326_vk, v1.20.3) had sha256
 # 5c8b57d4eb07dab32cdb44c99380bef68548e0fa30bb72b9a8207ec2be72c029.
@@ -26,18 +32,26 @@ WORK="${WORK:-$HOME/ppsspp-vk}"
 OUT="${OUT:-$WORK/out}"
 JOBS="${JOBS:-$(nproc)}"
 
-PPSSPP_VERSION="v1.20.3"
-PPSSPP_COMMIT="d357e6a32934800d3d80b49f910a603e1b069751"      # tag v1.20.3
+PPSSPP_VERSION="${PPSSPP_VERSION:-v1.20.3}"
+PPSSPP_COMMIT="${PPSSPP_COMMIT:-d357e6a32934800d3d80b49f910a603e1b069751}"      # tag v1.20.3
+EXTRA_CFLAGS="${EXTRA_CFLAGS:-}"
 SPRUCE_REPO="https://github.com/spruceUI/PPSSPP-spruce"
 SPRUCE_REV="e193c9a1d4aca6bbce927012b4e175f422ad6378"          # main, 2026-11-14
 TOOLCHAIN_URL="https://github.com/steward-fu/website/releases/download/miyoo-flip/flip-toolchain-v1.0.tar.gz"
 TOOLCHAIN_SHA256="1e975625ffc5ef8ffb9c243fadb36b587cb9611a89e7b817879d1a5bb14cbaeb"
 NAME="PPSSPPSDL_dArkMoss3326_vk"
+SRC="$WORK/ppsspp"
+BUILD="$WORK/build"
+if [ "$PPSSPP_VERSION" != v1.20.3 ]; then
+    NAME="${NAME}_${PPSSPP_VERSION}"
+    [ "${PPSSPP_VERSION#v}" = "$PPSSPP_VERSION" ] && NAME="${NAME}-${PPSSPP_COMMIT:0:9}"
+    SRC="$SRC-$PPSSPP_VERSION"
+    BUILD="$BUILD-$PPSSPP_VERSION"
+fi
+NAME="${NAME}${NAME_SUFFIX:-}"
 
 TC="$WORK/toolchain"
 SPRUCE="$WORK/PPSSPP-spruce"
-SRC="$WORK/ppsspp"
-BUILD="$WORK/build"
 mkdir -p "$WORK" "$OUT"
 
 # --- 1. Toolchain: Steward-Fu Miyoo Flip toolchain (Buildroot 2024.08.2, GCC 13.3.0,
@@ -64,10 +78,19 @@ fi
 git -C "$SPRUCE" checkout -q --detach "$SPRUCE_REV"
 PATCHES="$SPRUCE/patches"
 
-# --- 3. PPSSPP v1.20.3 with submodules (as build-darkmoss3326.sh clones it).
+# --- 3. PPSSPP with submodules (a tag as build-darkmoss3326.sh clones it; a branch's
+#        commit by itself).
 if [ ! -d "$SRC/.git" ]; then
-    git clone --depth 1 --branch "$PPSSPP_VERSION" --recurse-submodules --shallow-submodules \
-        https://github.com/hrydgard/ppsspp.git "$SRC"
+    if [ "${PPSSPP_VERSION#v}" != "$PPSSPP_VERSION" ]; then
+        git clone --depth 1 --branch "$PPSSPP_VERSION" --recurse-submodules --shallow-submodules \
+            https://github.com/hrydgard/ppsspp.git "$SRC"
+    else
+        git init -q "$SRC"
+        git -C "$SRC" remote add origin https://github.com/hrydgard/ppsspp.git
+        git -C "$SRC" fetch -q --depth 1 origin "$PPSSPP_COMMIT"
+        git -C "$SRC" checkout -q --detach FETCH_HEAD
+        git -C "$SRC" submodule update -q --init --recursive --depth 1
+    fi
     # Disk saving only: prebuilt FFmpeg for other platforms and the test corpus are unused here.
     ( cd "$SRC" && rm -rf ffmpeg/Windows10 ffmpeg/Windows ffmpeg/android ffmpeg/ios ffmpeg/macosx \
         ffmpeg/wiiu ffmpeg/blackberry ffmpeg/symbian ffmpeg/tvos \
@@ -122,13 +145,14 @@ CFLAGS="-Ofast -mcpu=cortex-a35 -ffunction-sections -fdata-sections -fomit-frame
 # dir. Map it to /build/ppsspp, the path spruce's Docker builds carry, so the binary does
 # not depend on where it was built.
 CFLAGS="$CFLAGS -ffile-prefix-map=$SRC=/build/ppsspp -ffile-prefix-map=$BUILD=/build/ppsspp/build"
+[ -n "$EXTRA_CFLAGS" ] && CFLAGS="$CFLAGS $EXTRA_CFLAGS"
 rm -rf "$BUILD"; mkdir -p "$BUILD"; cd "$BUILD"
 cmake "$SRC" -G "$GEN" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE="$TCFILE" \
     -DCMAKE_C_FLAGS="$CFLAGS" \
     -DCMAKE_CXX_FLAGS="$CFLAGS" \
-    -DCMAKE_EXE_LINKER_FLAGS="-Wl,--gc-sections -flto=auto" \
+    -DCMAKE_EXE_LINKER_FLAGS="-Wl,--gc-sections -flto=auto${EXTRA_CFLAGS:+ $EXTRA_CFLAGS}" \
     -DUSING_GLES2=ON \
     -DUSING_EGL=OFF \
     -DUSING_FBDEV=OFF \
