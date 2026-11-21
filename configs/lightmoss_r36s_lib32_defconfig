@@ -42,7 +42,7 @@ BR2_PACKAGE_RK3326_MALI=y
 # The g29p1 blob too, for the image's optional BSP 5.10 kernel (copied into
 # /usr/lib/arm-linux-gnueabihf/mali-g29p1 by lightmoss-lib32).
 BR2_PACKAGE_RK3326_MALI_G29P1=y
-BR2_STRIP_EXCLUDE_DIRS="/usr/lib/mali-g29p1"
+BR2_STRIP_EXCLUDE_DIRS="usr/lib/mali-g29p1"
 BR2_PACKAGE_ALSA_LIB=y
 BR2_PACKAGE_LIBEVDEV=y
 BR2_PACKAGE_SDL2=y
