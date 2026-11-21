@@ -41,17 +41,20 @@ LIGHTMOSS_REPO="$REPO"
 EOF
 ln -sf ../usr/lib/os-release "$TARGET_DIR/etc/os-release"
 
-# --- the LightMoss Update app ------------------------------------------------------
-# A spruce app, kept here and put on the spruce card before spruce starts
-# (usr/libexec/lightmoss/spruce-app), so the card always has the one that
-# knows how this LightMoss updates.
-APP="$TARGET_DIR/usr/share/lightmoss/spruce-app/LightMossUpdate"
-rm -rf "${APP:?}"
-mkdir -p "$APP"
-cp "$EXT"/board/r36s/spruce-app/LightMossUpdate/* "$APP/"
+# --- the LightMoss apps (LightMoss Update, LightMoss Kernel) -----------------------
+# spruce apps, kept here and put on the spruce card before spruce starts
+# (usr/libexec/lightmoss/spruce-app), so the card always has the ones that
+# know how this LightMoss updates and which kernels it has.
+APPS="$TARGET_DIR/usr/share/lightmoss/spruce-app"
+rm -rf "${APPS:?}"
 PYTHON="${HOST_DIR:-}/bin/python3"
 [ -x "$PYTHON" ] || PYTHON=python3
-"$PYTHON" "$EXT/board/r36s/make-app-icon.py" "$APP/icon.png"
+for app in LightMossUpdate:update LightMossKernel:kernel; do
+	APP="$APPS/${app%%:*}"
+	mkdir -p "$APP"
+	cp "$EXT/board/r36s/spruce-app/${app%%:*}"/* "$APP/"
+	"$PYTHON" "$EXT/board/r36s/make-app-icon.py" "$APP/icon.png" "${app##*:}"
+done
 
 # --- Debian library path ----------------------------------------------------------
 # spruce's dArkMoss code and PortMaster (PYSDL2_DLL_PATH, LD_LIBRARY_PATH) look for

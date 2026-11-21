@@ -1,0 +1,16 @@
+[Unit]
+Description=Keep the 5.10 kernel chosen once spruce is up on it
+Documentation=file:///usr/libexec/lightmoss/kernel-ok
+# A 5.10 start that boot.ini marked as a try (lightmoss-kernel-5.10-trying).
+ConditionKernelVersion=>=5.10
+ConditionPathExists=/boot/lightmoss-kernel-5.10-trying
+After=spruce-launch.service lightmoss-boot.service
+Requires=lightmoss-boot.service
+
+[Service]
+# Started, not waited for: it waits for spruce itself (up to 10 minutes).
+Type=exec
+ExecStart=/usr/libexec/lightmoss/kernel-ok
+
+[Install]
+WantedBy=multi-user.target

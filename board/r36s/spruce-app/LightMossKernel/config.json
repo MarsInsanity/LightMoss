@@ -1,0 +1,6 @@
+{
+  "label": "LightMoss Kernel",
+  "icon": "icon.png",
+  "launch": "launch.sh",
+  "description": "Choose LightMoss's kernel: 4.4 (standard) or 5.10 (experimental, with Vulkan)"
+}

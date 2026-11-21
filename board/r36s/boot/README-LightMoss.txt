@@ -30,12 +30,14 @@ The 5.10 kernel (experimental, for Vulkan)
 ------------------------------------------
 LightMoss starts its 4.4 kernel. It also carries Rockchip's 5.10 kernel with
 the newer Mali driver (g29p1), which adds Vulkan (as arkos4clone's and
-dArkOSen's 5.10 options do). To start 5.10, create an empty file named
-"lightmoss-kernel-5.10" (no extension) in this folder; delete it to go back
-to 4.4. Over SSH, "lightmoss-kernel 5.10" / "lightmoss-kernel 4.4" does the
-same, and "lightmoss-kernel" shows the choice. It takes effect at the next
-start, and updates keep it. If 5.10 does not start, delete the file from a
-computer.
+dArkOSen's 5.10 options do). To switch, open "LightMoss Kernel" in spruce's
+app list; it restarts into the kernel you pick. (It works by creating or
+deleting an empty file named "lightmoss-kernel-5.10" in this folder, which
+you can also do from a computer; over SSH, "lightmoss-kernel 5.10" / "4.4".)
+Updates keep the choice. Every 5.10 start is a try: if it does not get as far
+as spruce (or spruce does not come up within 10 minutes, which restarts the
+device), the next start is 4.4 again, and LightMoss Kernel offers another
+try. The marker for that is "lightmoss-kernel-5.10-trying" in this folder.
 
 SSH
 ---
