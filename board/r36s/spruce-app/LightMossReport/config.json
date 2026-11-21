@@ -1,0 +1,6 @@
+{
+  "label": "LightMoss Report",
+  "icon": "icon.png",
+  "launch": "launch.sh",
+  "description": "Write how this device runs (clocks, temperatures, emulator settings) to the SD card"
+}

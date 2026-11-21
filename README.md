@@ -186,6 +186,23 @@ above, keeping SPRUCEOS, spruce and the settings. Only with the charger
 connected; until then the update waits, and every start says so. The image
 left on the card is removed at the next start.
 
+### How the device runs: the LightMoss Report app
+
+A third spruce app, **LightMoss Report** (`/usr/bin/lightmoss-report`), writes
+to `LightMoss-Report` on the spruce card, so that measuring needs no SSH.
+*A report now* is a folder with `report.txt` (the kernel, the chip's grade
+from the kernel log, the CPU / GPU / memory clocks and how long each step was
+used, temperatures, the GPU driver, the PSP / Dreamcast / N64 settings on the
+card, the hardware as the kernel sees it) and the logs of this start and the
+previous one. It includes a CPU speed test, because cpufreq's numbers are what
+was asked for, not what the CPU runs at: Rockchip's kernels cap the CPU PLL by
+the chip's grade and report the requested rate. The test reads the rate the
+PLL is programmed to from its registers (PX30 CRU, through `/dev/mem`) at each
+cpufreq step, and times a loop at each as a second opinion. *The game
+recorder* (`lightmoss-report watch`) runs for 10 minutes next to a game and
+notes, every 5 seconds, the clocks, temperatures, each core's and the GPU's
+load and the threads that use the CPU: what limits that game.
+
 ## Boot time
 
 What LightMoss itself spends between power-on and spruce's `runtime.sh`, and
@@ -233,7 +250,8 @@ board/r36s/genimage.cfg              disk layout
 board/r36s/post-build.sh             os-release, spruce login, compat links
 board/r36s/initramfs/init            the boot-time updater (uInitrd)
 board/r36s/test-updater.sh           tests it against disk images
-board/r36s/spruce-app/               the LightMoss Update app (+ make-app-icon.py)
+board/r36s/spruce-app/               the LightMoss Update, Kernel and Report apps
+                                     (+ make-app-icon.py)
 package/rk3326-uboot/                legacy Rockchip U-Boot (+ patches)
 package/linaro-gcc6-aarch64/         the GCC 6.3 toolchain that U-Boot needs
 package/rk3326-mali/                 Mali-G31 user-space blob (64- and 32-bit)

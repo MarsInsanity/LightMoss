@@ -1,0 +1,413 @@
+#!/bin/sh
+# lightmoss-report [now]
+# lightmoss-report watch [SECONDS]
+#
+# Writes how this R36S runs to LightMoss-Report on the spruce card, where a PC
+# can read it: the LightMoss Report app in spruce runs both forms, so nothing
+# here needs SSH.
+#
+#   now    A folder LightMoss-Report/<date>-<time>/ with report.txt (kernel,
+#          the chip's grade, CPU / GPU / memory clocks and how long each was
+#          used, a CPU speed test, temperatures, the GPU driver, the PSP /
+#          Dreamcast / N64 settings on the card, the device's hardware as the
+#          kernel sees it), kernel.log and previous-boot.log.
+#   watch  LightMoss-Report/watch-<date>-<time>.txt: one sample every 5
+#          seconds for SECONDS (default 600) of the clocks, temperatures, how
+#          busy each CPU core, the GPU and the memory controller are, and
+#          which threads use the CPU. Started before a game, it shows what
+#          limits that game.
+#
+# The CPU speed test: cpufreq's numbers are what was asked for, not what the
+# CPU runs at. Rockchip's kernels cap the CPU PLL by the chip's grade
+# (rockchip_adjust_power_scale) and then report the rate that was requested.
+# The rate the PLL is really programmed to is in its registers, read here
+# through /dev/mem; a timed loop at each cpufreq step confirms it.
+set -u
+
+DIR=/mnt/SDCARD/LightMoss-Report
+KEEP=8
+STEP=5
+
+CPUFREQ=/sys/devices/system/cpu/cpufreq/policy0
+
+# --- the CPU clock as programmed (PX30 CRU at 0xff2b0000) -------------------------
+# APLL: CON0 fbdiv[11:0] postdiv1[14:12], CON1 refdiv[5:0] postdiv2[8:6]
+# dsmpd[12], CON2 frac[23:0]; 24 MHz in. MODE_CON[1:0]: 1 = the PLL's output,
+# else 24 MHz or 32 kHz. CLKSEL_CON0: core divider [3:0], core source [7]
+# (1 = GPLL, which the kernel parks the cores on while it retunes the APLL).
+# Prints kHz, or nothing when /dev/mem cannot be read.
+reg() { devmem "$1" 32 2>/dev/null; }
+cpu_khz() {
+	_c0=$(reg 0xff2b0000) && _c1=$(reg 0xff2b0004) && _c2=$(reg 0xff2b0008) &&
+		_md=$(reg 0xff2b00a0) && _sel=$(reg 0xff2b0100) || return 1
+	[ -n "$_c0" ] && [ -n "$_sel" ] || return 1
+	_fb=$((_c0 & 0xfff)); _p1=$(((_c0 >> 12) & 7))
+	_rd=$((_c1 & 0x3f)); _p2=$(((_c1 >> 6) & 7)); _ds=$(((_c1 >> 12) & 1))
+	_fr=$((_c2 & 0xffffff))
+	[ "$_rd" -gt 0 ] && [ "$_p1" -gt 0 ] && [ "$_p2" -gt 0 ] || return 1
+	[ "$_ds" = 1 ] && _fr=0
+	if [ $(((_sel >> 7) & 1)) = 1 ]; then
+		echo gpll
+		return 0
+	fi
+	case $((_md & 3)) in
+	1) _k=$(((24000 * _fb + 24000 * _fr / 16777216) / _rd / _p1 / _p2)) ;;
+	0) _k=24000 ;;
+	*) _k=32 ;;
+	esac
+	echo $((_k / ((_sel & 0xf) + 1)))
+}
+
+rd() { cat "$1" 2>/dev/null || echo "-"; }
+sec() { echo; echo "=== $*"; }
+# Every readable file in a directory as "name: value" (one-line files), the
+# longer ones under their name.
+dump() {
+	for _f in "$1"/*; do
+		[ -f "$_f" ] && [ -r "$_f" ] || continue
+		case "${_f##*/}" in uevent | subsystem | trans_stat | time_in_state) continue ;; esac
+		_v="$(cat "$_f" 2>/dev/null)" || continue
+		case "$_v" in
+		*"
+"*) echo "${_f##*/}:"; echo "$_v" | sed 's/^/    /' ;;
+		*) echo "${_f##*/}: $_v" ;;
+		esac
+	done
+}
+
+temps() {
+	for _z in /sys/class/thermal/thermal_zone*; do
+		[ -r "$_z/temp" ] || continue
+		_t=$(cat "$_z/temp" 2>/dev/null) || continue
+		printf '%s=%d.%d ' "$(rd "$_z/type")" $((_t / 1000)) $((_t % 1000 / 100))
+	done
+}
+
+# --- one sample of CPU use ------------------------------------------------------------
+# sample STATE SECONDS: per-core busy time from /proc/stat and per-thread CPU
+# time from /proc/<pid>/task/<tid>/stat, as differences against the previous
+# call's numbers in STATE. Threads that used 3% of a core or more are listed,
+# busiest first, as process/thread=percent@core.
+sample() {
+	{
+		grep '^cpu[0-9]' /proc/stat
+		grep -H '' /proc/[0-9]*/task/[0-9]*/stat 2>/dev/null
+	} | awk -v state="$1" -v secs="$2" '
+	BEGIN {
+		while ((getline l < state) > 0) {
+			n = split(l, p, " ")
+			if (p[1] == "c") { cbusy[p[2]] = p[3]; ctot[p[2]] = p[4] }
+			else if (p[1] == "t") old[p[2]] = p[3]
+		}
+		close(state)
+		hz = 100
+	}
+	/^cpu[0-9]/ {
+		tot = 0
+		for (i = 2; i <= 9 && i <= NF; i++) tot += $i
+		busy = tot - $5 - $6
+		if ($1 in ctot && tot > ctot[$1])
+			cores = cores sprintf("%s=%d%% ", $1, 100 * (busy - cbusy[$1]) / (tot - ctot[$1]) + 0.5)
+		keep[++nk] = "c " $1 " " busy " " tot
+		next
+	}
+	{
+		c = index($0, ":")
+		path = substr($0, 1, c - 1); rest = substr($0, c + 1)
+		split(path, pp, "/"); pid = pp[3]; tid = pp[5]
+		o = index(rest, "("); e = 0
+		for (i = length(rest); i > 0; i--) if (substr(rest, i, 1) == ")") { e = i; break }
+		if (!o || !e) next
+		comm = substr(rest, o + 1, e - o - 1)
+		gsub(/ /, "_", comm)
+		split(substr(rest, e + 2), a, " ")
+		ticks = a[12] + a[13]
+		if (pid == tid) pname[pid] = comm
+		key = pid "/" tid
+		keep[++nk] = "t " key " " ticks
+		if (key in old && ticks > old[key]) {
+			nt++; tpid[nt] = pid; tcomm[nt] = comm; tcpu[nt] = a[37]
+			tuse[nt] = (ticks - old[key]) * 100 / hz / secs
+		}
+	}
+	END {
+		for (i = 1; i <= nk; i++) print keep[i] > state
+		close(state)
+		print "busy: " cores
+		out = ""
+		for (r = 0; r < 12; r++) {
+			best = 0
+			for (i = 1; i <= nt; i++) if (tuse[i] > tuse[best] + 0 && tuse[i] >= 3) best = i
+			if (!best) break
+			nm = (tpid[best] in pname) ? pname[tpid[best]] : tpid[best]
+			if (nm != tcomm[best]) nm = nm "/" tcomm[best]
+			out = out sprintf("%s=%d%%@%s ", nm, tuse[best] + 0.5, tcpu[best])
+			tuse[best] = 0
+		}
+		print "threads: " out
+	}'
+}
+
+clocks_line() {
+	_real=$(cpu_khz) || _real="?"
+	printf 'cpu: asked %s kHz (%s), runs at %s kHz | ' \
+		"$(rd $CPUFREQ/scaling_cur_freq)" "$(rd $CPUFREQ/scaling_governor)" "$_real"
+	for _d in /sys/class/devfreq/*; do
+		[ -r "$_d/cur_freq" ] || continue
+		_n="${_d##*/}"
+		case "$_n" in *gpu*) _n=gpu ;; esac
+		printf '%s: %d MHz' "$_n" $(($(cat "$_d/cur_freq") / 1000000))
+		[ -r "$_d/load" ] && printf ' load %s' "$(cat "$_d/load" 2>/dev/null | sed 's/@.*//')"
+		printf ' (%s) | ' "$(rd "$_d/governor")"
+	done
+	printf 'temp: %s\n' "$(temps)"
+}
+
+# --- watch -------------------------------------------------------------------------------
+watch() {
+	_total="${1:-600}"
+	_out="$DIR/watch-$STAMP.txt"
+	_state=/tmp/lightmoss-report.$$
+	: > "$_state"
+	{
+		echo "LightMoss $(sed -n 's/^LIGHTMOSS_VERSION="\(.*\)"/\1/p' /etc/os-release), kernel $(uname -r), $(date 2>/dev/null)"
+		echo "One sample every $STEP s for $_total s. busy: each core's busy time. threads: process/thread=share of one core@core it last ran on."
+		echo "A thread near 100% is what limits a game; the GPU's load is how busy the GPU is at its current clock."
+		echo
+	} > "$_out"
+	sample "$_state" "$STEP" > /dev/null
+	_t=0
+	_last=$(cut -d' ' -f1 /proc/uptime)
+	while [ "$_t" -lt "$_total" ]; do
+		sleep "$STEP"
+		_t=$((_t + STEP))
+		_now=$(cut -d' ' -f1 /proc/uptime)
+		_el=$(awk -v a="$_last" -v b="$_now" 'BEGIN { d = b - a; if (d <= 0) d = 1; print d }')
+		_last=$_now
+		{
+			printf 't=%4ds ' "$_t"
+			clocks_line
+			sample "$_state" "$_el" | sed 's/^/        /'
+		} >> "$_out"
+		# The card can go away (spruce unmounts it to restart or switch off).
+		[ -d "$DIR" ] || break
+	done
+	rm -f "$_state"
+	ls -1 "$DIR"/watch-*.txt 2>/dev/null | sort | head -n "-$KEEP" | while read -r _old; do
+		rm -f "$_old"
+	done
+	sync
+	echo "$_out"
+}
+
+# --- CPU speed test ----------------------------------------------------------------------
+# Counts loop passes in 2 seconds of awk at each cpufreq step with the
+# governor on performance. Passes per second follow the CPU clock, so the
+# ratio between two steps is the ratio of their real clocks, whatever cpufreq
+# says. The governor and limits are put back afterwards.
+bench() {
+	taskset -c 3 awk 'BEGIN {
+		getline a < "/proc/uptime"; close("/proc/uptime"); split(a, A, " ")
+		for (;;) {
+			for (i = 0; i < 20000; i++) x += i % 7
+			n += 20000
+			getline b < "/proc/uptime"; close("/proc/uptime"); split(b, B, " ")
+			if (B[1] - A[1] >= 2) break
+		}
+		printf "%d\n", n / (B[1] - A[1])
+	}' 2>/dev/null
+}
+
+speed_test() {
+	[ -w $CPUFREQ/scaling_governor ] || { echo "no cpufreq"; return; }
+	_gov=$(cat $CPUFREQ/scaling_governor)
+	_min=$(cat $CPUFREQ/scaling_min_freq)
+	_max=$(cat $CPUFREQ/scaling_max_freq)
+	trap 'echo "$_max" > $CPUFREQ/scaling_max_freq; echo "$_min" > $CPUFREQ/scaling_min_freq; echo "$_gov" > $CPUFREQ/scaling_governor' EXIT INT TERM
+	echo "$(cat $CPUFREQ/cpuinfo_min_freq)" > $CPUFREQ/scaling_min_freq 2>/dev/null
+	echo "$(cat $CPUFREQ/cpuinfo_max_freq)" > $CPUFREQ/scaling_max_freq 2>/dev/null
+	echo performance > $CPUFREQ/scaling_governor 2>/dev/null
+	echo "(before: governor $_gov, $_min-$_max kHz; temperatures $(temps))"
+	printf '%-12s %-12s %-12s %-10s %-14s %s\n' "step kHz" "cpufreq kHz" "PLL kHz" "vdd_arm" "loop passes/s" "clock by the loop"
+	_base=""; _basek=""
+	for _f in $(tr ' ' '\n' < $CPUFREQ/scaling_available_frequencies | sort -n); do
+		echo "$_f" > $CPUFREQ/scaling_max_freq 2>/dev/null
+		sleep 1
+		_cur=$(rd $CPUFREQ/scaling_cur_freq)
+		_pll=$(cpu_khz) || _pll="?"
+		_uv="-"
+		for _r in /sys/class/regulator/regulator.*; do
+			[ "$(cat "$_r/name" 2>/dev/null)" = vdd_arm ] && _uv="$(($(cat "$_r/microvolts") / 1000)) mV"
+		done
+		_n=$(bench)
+		# The lowest step is far below any cap: its real clock is the
+		# PLL's (or, without /dev/mem, the step's), and the others scale
+		# from it.
+		if [ -z "$_base" ] && [ -n "$_n" ] && [ "$_n" -gt 0 ] 2>/dev/null; then
+			_base=$_n
+			case "$_pll" in '?' | gpll) _basek=$_f ;; *) _basek=$_pll ;; esac
+		fi
+		_est="-"
+		[ -n "$_base" ] && [ -n "$_n" ] && _est="$((_n * (_basek / 1000) / _base)) MHz"
+		printf '%-12s %-12s %-12s %-10s %-14s %s\n' "$_f" "$_cur" "$_pll" "$_uv" "${_n:--}" "$_est"
+	done
+	echo "$_max" > $CPUFREQ/scaling_max_freq 2>/dev/null
+	echo "$_min" > $CPUFREQ/scaling_min_freq 2>/dev/null
+	echo "$_gov" > $CPUFREQ/scaling_governor 2>/dev/null
+	trap - EXIT INT TERM
+	echo "(after: temperatures $(temps))"
+}
+
+# The settings that decide an emulator's speed, out of an ini file: nothing
+# else in it (accounts, paths) is copied.
+ppsspp_keys() {
+	grep -E '^(GraphicsBackend|FailedGraphicsBackends|DisabledGraphicsBackends|VulkanDevice|FrameSkip|FrameSkipType|AutoFrameSkip|FrameRate|FrameRate2|InternalResolution|SoftwareSkinning|HardwareTransform|HardwareTessellation|SkipBufferEffects|SkipGPUReadbackMode|TextureBackoffCache|TextureFiltering|TexScalingLevel|AnisotropyLevel|MultiSampleLevel|SplineBezierQuality|BloomHack|InflightFrames|RenderDuplicateFrames|MultiThreading|VerticalSync|LowLatencyPresent|DisplayRefreshRate|ShaderCache|UberShaderVertex|UberShaderFragment|HighQualityDepth|DepthRasterMode|DisableRangeCulling|ReplaceTextures|iShowStatusFlags|ShowFPSCounter|CPUCore|CPUSpeed|SeparateSASThread|IOTimingMethod|FastMemoryAccess|FunctionReplacements|JitDisableFlags|ForceLagSync2|AudioBackend|AudioBufferSize|ExtraAudioBuffering|EnableCheats|RewindSnapshotInterval)[[:space:]]*=' "$1" 2>/dev/null |
+		sed 's/^/    /'
+}
+
+now() {
+	OUT="$DIR/$STAMP"
+	mkdir -p "$OUT" || exit 1
+	journalctl -k -b 0 --no-pager > "$OUT/kernel.log" 2>/dev/null
+	[ -s "$OUT/kernel.log" ] || dmesg > "$OUT/kernel.log" 2>/dev/null
+	journalctl -b -1 --no-pager > "$OUT/previous-boot.log" 2>/dev/null
+	{
+		echo "LightMoss report, $(date 2>/dev/null)"
+		sed -n 's/^PRETTY_NAME=//p' /etc/os-release
+		echo "kernel:  $(uname -a)"
+		echo "model:   $(cat /proc/device-tree/model 2>/dev/null | tr -d '\0') ($(cat /proc/device-tree/compatible 2>/dev/null | tr '\0' ' '))"
+		echo "cmdline: $(cat /proc/cmdline)"
+		echo "uptime:  $(uptime)"
+		echo "kernel choice: 5.10 chosen $([ -e /boot/lightmoss-kernel-5.10 ] && echo yes || echo no), try marker $([ -e /boot/lightmoss-kernel-5.10-trying ] && echo yes || echo no)"
+
+		sec "chip grade and clock tables, from the kernel log"
+		grep -iE 'pvtm|leakage|bin[-=]|soc version|scale|opp|avs|vdd_arm|vdd_logic|cpufreq|dmc|mali|bifrost|thermal|tsadc' "$OUT/kernel.log" |
+			sed 's/^[A-Z][a-z]* [0-9 ]*[0-9:]* [^ ]* kernel: //' | head -n 120
+
+		sec "CPU clock (cpufreq)"
+		dump $CPUFREQ
+		echo "runs at (PLL registers): $(cpu_khz || echo '?') kHz"
+		echo "time at each step (kHz, 10 ms units):"; sed 's/^/    /' $CPUFREQ/stats/time_in_state 2>/dev/null
+		echo "idle states:"
+		for _s in /sys/devices/system/cpu/cpu0/cpuidle/state*; do
+			[ -d "$_s" ] && echo "    $(rd "$_s/name"): used $(rd "$_s/usage") times, $(rd "$_s/time") us, disabled $(rd "$_s/disable")"
+		done
+		echo "CPU voltages and rates (the kernel's OPP table):"
+		for _o in /sys/kernel/debug/opp/cpu0/opp:*; do
+			[ -d "$_o" ] && echo "    $(rd "$_o/rate_hz") Hz: $(rd "$_o/supply-0/u_volt_target") uV"
+		done 2>/dev/null | sort -n
+
+		sec "CPU speed test"
+		speed_test
+
+		for _d in /sys/class/devfreq/*; do
+			[ -d "$_d" ] || continue
+			sec "devfreq ${_d##*/}"
+			dump "$_d"
+			echo "trans_stat:"; sed 's/^/    /' "$_d/trans_stat" 2>/dev/null
+			[ -d "$_d/device" ] && for _a in system_status upthreshold downdifferential utilisation utilisation_period gpuinfo; do
+				[ -r "$_d/device/$_a" ] && echo "$_a: $(cat "$_d/device/$_a" 2>/dev/null)"
+			done
+		done
+
+		sec "regulators"
+		for _r in /sys/class/regulator/regulator.*; do
+			[ -r "$_r/microvolts" ] && echo "$(rd "$_r/name"): $(rd "$_r/microvolts") uV ($(rd "$_r/state"))"
+		done
+
+		sec "thermal"
+		for _z in /sys/class/thermal/thermal_zone*; do
+			[ -d "$_z" ] || continue
+			echo "${_z##*/} $(rd "$_z/type"): $(rd "$_z/temp") (policy $(rd "$_z/policy"))"
+			for _p in "$_z"/trip_point_*_temp; do
+				[ -r "$_p" ] && echo "    trip $(rd "${_p%_temp}_type") at $(cat "$_p")"
+			done
+		done
+		for _c in /sys/class/thermal/cooling_device*; do
+			[ -d "$_c" ] && echo "${_c##*/} $(rd "$_c/type"): state $(rd "$_c/cur_state") of $(rd "$_c/max_state")"
+		done
+
+		sec "memory"
+		head -n 8 /proc/meminfo
+		grep -E '^(Swap|Cma|Shmem:|AnonPages|Mapped)' /proc/meminfo
+		cat /proc/swaps 2>/dev/null
+
+		sec "GPU driver"
+		echo "Vulkan ICD: $([ -e /run/lightmoss/mali_icd.json ] && echo "yes (g29p1)" || echo "no")"
+		ls -l /usr/lib/libmali* /usr/lib/libvulkan* /etc/vulkan/icd.d 2>/dev/null
+		grep -i mali /proc/mounts
+		cat /sys/module/bifrost_kbase/version /sys/module/mali_kbase/version 2>/dev/null
+		ls -l /dev/dri /dev/mali0 /dev/dma_heap 2>/dev/null
+
+		sec "load with spruce's menu showing (3 samples, $STEP s each)"
+		_state=/tmp/lightmoss-report.$$
+		: > "$_state"
+		sample "$_state" "$STEP" > /dev/null
+		for _i in 1 2 3; do
+			sleep "$STEP"
+			clocks_line
+			sample "$_state" "$STEP" | sed 's/^/    /'
+		done
+		rm -f "$_state"
+
+		sec "PSP (PPSSPP) on the card"
+		for _b in /mnt/SDCARD/Emu/PSP/PPSSPPSDL_dArkMoss3326*; do
+			[ -f "$_b" ] && echo "$(sha256sum "$_b" | cut -c1-64)  $(stat -c %s "$_b")  ${_b##*/}"
+		done
+		grep -E '"(Governor|Emulator[A-Za-z0-9_]*)"|"selected"' /mnt/SDCARD/Emu/PSP/config.json 2>/dev/null | sed 's/^ */    /'
+		_p=/mnt/SDCARD/Saves/.config/ppsspp/PSP/SYSTEM
+		for _i in "$_p/ppsspp-G350.ini" "$_p/ppsspp.ini" "$_p"/*_ppsspp.ini; do
+			[ -f "$_i" ] || continue
+			echo "${_i##*/}:"
+			ppsspp_keys "$_i"
+		done
+		[ -s "$_p/FailedGraphicsBackends.txt" ] && echo "FailedGraphicsBackends.txt: $(cat "$_p/FailedGraphicsBackends.txt")"
+
+		sec "Dreamcast (Flycast) on the card"
+		grep -E '"(Governor|Emulator[A-Za-z0-9_]*)"|"selected"' /mnt/SDCARD/Emu/DC/config.json 2>/dev/null | sed 's/^ */    /'
+		grep -E '^(pvr\.|rend\.|Dynarec|aica\.|audio\.backend|ta\.|Fast|Dreamcast\.(Broadcast|Cable|Region))' \
+			/mnt/SDCARD/Emu/DC/config/flycast/emu.cfg 2>/dev/null | sed 's/^/    /'
+
+		sec "N64 on the card"
+		grep -E '"(Governor|Emulator[A-Za-z0-9_]*)"|"selected"' /mnt/SDCARD/Emu/N64/config.json 2>/dev/null | sed 's/^ */    /'
+
+		sec "hardware as the kernel sees it"
+		echo "--- input"; grep -E '^(N|H):' /proc/bus/input/devices
+		echo "--- sound"; cat /proc/asound/cards 2>/dev/null
+		echo "--- battery and charger"
+		for _b in /sys/class/power_supply/*; do
+			[ -r "$_b/uevent" ] && { echo "${_b##*/}:"; sed 's/^POWER_SUPPLY_/    /' "$_b/uevent"; }
+		done
+		echo "--- block devices"; lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINT 2>/dev/null
+		echo "--- network"; ip -o addr 2>/dev/null; lsusb 2>/dev/null
+		echo "--- modules"; cut -d' ' -f1 /proc/modules | tr '\n' ' '; echo
+		echo "--- failed units"; systemctl --failed --no-pager 2>/dev/null
+		echo "--- suspend"; cat /sys/kernel/debug/suspend_stats 2>/dev/null | head -n 12
+
+		sec "kernel warnings and errors of this start"
+		journalctl -k -b 0 -p warning --no-pager 2>/dev/null | tail -n 80
+
+		sec "how the previous start ended (its last 60 lines; all of it is in previous-boot.log)"
+		tail -n 60 "$OUT/previous-boot.log" 2>/dev/null
+	} > "$OUT/report.txt" 2>&1
+
+	[ -f /mnt/SDCARD/Saves/spruce/spruce.log ] && cp -f /mnt/SDCARD/Saves/spruce/spruce.log "$OUT/" 2>/dev/null
+	ls -1d "$DIR"/*/ 2>/dev/null | sort | head -n "-$KEEP" | while read -r _old; do
+		rm -rf "$_old"
+	done
+	sync
+	echo "$OUT"
+}
+
+mountpoint -q /mnt/SDCARD || { echo "lightmoss-report: the spruce card is not mounted" >&2; exit 1; }
+mkdir -p "$DIR" || exit 1
+STAMP=$(date +%Y%m%d-%H%M%S 2>/dev/null) || STAMP=unknown
+
+case "${1:-now}" in
+now) now ;;
+watch) watch "${2:-600}" ;;
+*)
+	echo "usage: lightmoss-report [now | watch [SECONDS]]" >&2
+	exit 2
+	;;
+esac

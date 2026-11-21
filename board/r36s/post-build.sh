@@ -41,7 +41,7 @@ LIGHTMOSS_REPO="$REPO"
 EOF
 ln -sf ../usr/lib/os-release "$TARGET_DIR/etc/os-release"
 
-# --- the LightMoss apps (LightMoss Update, LightMoss Kernel) -----------------------
+# --- the LightMoss apps (LightMoss Update, LightMoss Kernel, LightMoss Report) ------
 # spruce apps, kept here and put on the spruce card before spruce starts
 # (usr/libexec/lightmoss/spruce-app), so the card always has the ones that
 # know how this LightMoss updates and which kernels it has.
@@ -49,7 +49,7 @@ APPS="$TARGET_DIR/usr/share/lightmoss/spruce-app"
 rm -rf "${APPS:?}"
 PYTHON="${HOST_DIR:-}/bin/python3"
 [ -x "$PYTHON" ] || PYTHON=python3
-for app in LightMossUpdate:update LightMossKernel:kernel; do
+for app in LightMossUpdate:update LightMossKernel:kernel LightMossReport:report; do
 	APP="$APPS/${app%%:*}"
 	mkdir -p "$APP"
 	cp "$EXT/board/r36s/spruce-app/${app%%:*}"/* "$APP/"

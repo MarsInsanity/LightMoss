@@ -41,6 +41,29 @@ does not come up within 10 minutes restarts the device), and LightMoss
 Kernel offers another try. The marker for that is
 "lightmoss-kernel-5.10-trying" in this folder.
 
+LightMoss Report (how the device runs, for a PC to read)
+--------------------------------------------------------
+spruce's app list has "LightMoss Report". It writes to the folder
+LightMoss-Report on the spruce card (the SD card with your games), and has
+two parts:
+
+A: a report now. About a minute. A folder named by date and time with
+   report.txt (the kernel, the chip's grade, the CPU / GPU / memory clocks,
+   a CPU speed test, temperatures, the GPU driver, the PSP / Dreamcast / N64
+   settings on the card, the hardware as the kernel sees it) and the logs
+   of this start and the previous one. The speed test matters because the
+   kernel runs the CPU at the speed the chip is graded for, whatever higher
+   speed spruce's CPU modes ask for and show.
+
+B, then A: the game recorder. For the next 10 minutes it notes, every 5
+   seconds, the clocks, temperatures, how busy each CPU core and the GPU
+   are and which threads use the CPU. Start it, then start a game right away
+   and play for a few minutes: the watch-<date>-<time>.txt it leaves shows
+   what limits that game (one thread at 100%: the CPU; the GPU's load near
+   100%: the GPU).
+
+Over SSH: "lightmoss-report" and "lightmoss-report watch 600".
+
 SSH
 ---
 spruce's Network Settings turns SSH on and off. Log in as "spruce" (or

@@ -2,9 +2,9 @@
 """The LightMoss apps' icons: a 70x70 RGBA PNG (the size of spruce's own app
 icons) on a moss-green rounded square: for LightMoss Update ("update", the
 default) a white arrow down into a tray, for LightMoss Kernel ("kernel") a
-white chip with pins.
+white chip with pins, for LightMoss Report ("report") a white bar chart.
 
-    make-app-icon.py OUT.png [update|kernel]
+    make-app-icon.py OUT.png [update|kernel|report]
 
 Plain Python (zlib, struct), drawn with 4x4 supersampling for smooth edges,
 so the build needs nothing beyond the host's python3.
@@ -43,12 +43,24 @@ def in_chip(x, y):
     return False
 
 
+def in_chart(x, y):
+    # A bar chart: three bars of rising height on a baseline.
+    if 14.0 <= x <= 56.0 and 52.0 <= y <= 57.0:
+        return True
+    for left, top in ((17.0, 38.0), (30.0, 27.0), (43.0, 14.0)):
+        if left <= x <= left + 10.0 and top <= y <= 52.0:
+            return True
+    return False
+
+
 GLYPH = "update"
 
 
 def in_glyph(x, y):
     if GLYPH == "kernel":
         return in_chip(x, y)
+    if GLYPH == "report":
+        return in_chart(x, y)
     # Arrow: a shaft and a head pointing down.
     if 31.0 <= x <= 39.0 and 13.0 <= y <= 34.0:
         return True

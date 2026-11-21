@@ -1,6 +1,7 @@
 #!/bin/sh
 # Before spruce starts: put LightMoss's spruce apps on the spruce card
-# (App/LightMossUpdate, App/LightMossKernel), or bring them up to date.
+# (App/LightMossUpdate, App/LightMossKernel, App/LightMossReport), or bring
+# them up to date.
 # LightMoss ships them, so the card always has the ones that know how this
 # LightMoss updates and which kernels it has. Files are only written when
 # they differ. Also removes the image a finished update left at the root of
