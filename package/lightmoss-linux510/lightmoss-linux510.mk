@@ -21,7 +21,8 @@ LIGHTMOSS_LINUX510_SITE = $(call github,jokubasver,rockchip-kernel,$(LIGHTMOSS_L
 LIGHTMOSS_LINUX510_LICENSE = GPL-2.0
 LIGHTMOSS_LINUX510_LICENSE_FILES = COPYING
 LIGHTMOSS_LINUX510_INSTALL_IMAGES = YES
-LIGHTMOSS_LINUX510_DEPENDENCIES = host-bison host-flex host-kmod host-openssl host-bc
+# bc and perl come from the build host (buildroot requires them).
+LIGHTMOSS_LINUX510_DEPENDENCIES = host-bison host-flex host-kmod host-openssl
 
 LIGHTMOSS_LINUX510_BOARD_DIR = $(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/r36s/linux-5.10
 LIGHTMOSS_LINUX510_DEFCONFIG = clone_defconfig
