@@ -40,12 +40,6 @@ freezes or is switched off before then counts as failed; one where spruce
 does not come up within 10 minutes restarts the device), and LightMoss
 Kernel offers another try. The marker for that is
 "lightmoss-kernel-5.10-trying" in this folder.
-Under 5.10 the CPU starts at 1296 MHz at most, then runs at the speeds
-spruce's CPU modes ask for: up to 1416 MHz, and 1512 MHz in Overclock (at
-most 1.35 V, the voltage it already uses at 1248 MHz). These are above the
-speed Rockchip grades this chip for (1296 MHz), as with dArkOSen's
-overclock; if heavy games freeze under 5.10, choose a lower CPU mode for
-them in spruce.
 
 SSH
 ---
