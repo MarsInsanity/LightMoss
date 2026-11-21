@@ -18,8 +18,12 @@ Environment=HOME=/root
 # Kill only runtime.sh on stop, not the whole cgroup: spruce powers off from
 # save_poweroff.sh, a descendant of runtime.sh that kills runtime.sh on its way
 # past. With the default KillMode=control-group systemd would then kill
-# save_poweroff.sh too, before it reaches the poweroff.
+# save_poweroff.sh too, before it reaches the poweroff. What stays behind is
+# ended by spruce-leftovers: here, before a restart starts a second spruce
+# beside the first one's watchdogs, and at shutdown by
+# lightmoss-spruce-leftovers.service, before the card is unmounted.
 KillMode=process
+ExecStartPre=-/usr/libexec/lightmoss/spruce-leftovers 3
 ExecStartPre=/usr/libexec/lightmoss/mount-spruce
 # The LightMoss Update app onto the card; never in the way of the frontend.
 ExecStartPre=-/usr/libexec/lightmoss/spruce-app
