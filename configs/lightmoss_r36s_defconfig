@@ -10,6 +10,10 @@ BR2_cortex_a35=y
 BR2_BACKUP_SITE="https://sources.buildroot.net"
 BR2_CCACHE=y
 BR2_OPTIMIZE_2=y
+# Patches for buildroot's packages (SDL2: automatic controller mappings
+# without the name CRC, so a program's gamecontrollerdb.txt applies, as on
+# dArkMoss).
+BR2_GLOBAL_PATCH_DIR="$(BR2_EXTERNAL_LIGHTMOSS_PATH)/board/r36s/patches"
 
 # --- Toolchain: glibc (PortMaster ports are glibc binaries) --------------------
 BR2_TOOLCHAIN_BUILDROOT_GLIBC=y
