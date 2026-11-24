@@ -2,11 +2,11 @@
   "about": "What LightMoss's daily maintenance run has reviewed: newer commits and releases are reviewed next time. Updated with the run's own commits.",
   "spruceUI/spruceOS": {
     "branch": "Development",
-    "commit": "0200ef80afb206dd0c740f26c768d8e84dfba804",
+    "commit": "4497d1d58c5807a1266b7c354419f7d67cf4840b",
     "latest_release": "v4.6.0"
   },
   "spruceUI/spruceOSNightlies": {
-    "latest_release": "v4.6.1-20261123.2"
+    "latest_release": "v4.6.1-20261124"
   },
   "spruceUI/dArkMoss": {
     "branch": "spruce",
@@ -18,7 +18,7 @@
   },
   "ROCKNIX/distribution": {
     "branch": "next",
-    "commit": "1d806accd02e9bbfeca03cb5497179e77c7c18d8"
+    "commit": "73e059b3c4ba9573ab666155d73f19896ff35a54"
   },
   "OpenHandheldCollective/OpenABL": {
     "latest_release": "v1.2"
