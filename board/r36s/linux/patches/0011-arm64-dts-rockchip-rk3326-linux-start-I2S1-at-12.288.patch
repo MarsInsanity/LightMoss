@@ -1,0 +1,51 @@
+From 018939b6359dbed63c3cd1dd77a879f126a7d9f4 Mon Sep 17 00:00:00 2001
+From: jokubasver <jokubas.ver@gmail.com>
+Date: Wed, 25 Nov 2026 11:55:03 +0200
+Subject: [PATCH 11/11] arm64: dts: rockchip: rk3326-linux: start I2S1 at 12.288 MHz
+
+The I2S1 clock also drives the RK817 codec MCLK. simple-audio-card
+reads the I2S clock rate at probe and hands it to set_sysclk, so the
+I2S driver kept the clock at its boot rate, 100 MHz (GPLL / 12), and
+the codec ran from it with the speaker amplifier on until the first
+stream's hw_params set a real rate.
+
+The 5.10 kernel had the same path with a 600 MHz clock; there the
+speaker played noise from boot until the first sound, and a G80CA
+board's speaker was damaged during the long first boot.
+
+Assign 256 * 48 kHz, so the codec is clocked correctly before the
+first stream. Every RK3326 DTB includes this file.
+
+LightMoss: lcdyk0517/arkos.bsp.4.4 44b9cfa2d53, the same node at the same place
+in christianhaitian/linux's rk3326-linux.dtsi (whose context differs: no sdio
+pinctrl block after it).
+---
+ arch/arm64/boot/dts/rockchip/rk3326-linux.dtsi | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/rockchip/rk3326-linux.dtsi b/arch/arm64/boot/dts/rockchip/rk3326-linux.dtsi
+index 2243ab31d..b89986bda 100644
+--- a/arch/arm64/boot/dts/rockchip/rk3326-linux.dtsi
++++ b/arch/arm64/boot/dts/rockchip/rk3326-linux.dtsi
+@@ -121,6 +121,18 @@
+ 	};
+ };
+ 
++&i2s1_2ch {
++	/*
++	 * Start the I2S1 clock, which also feeds the RK817 codec MCLK, at
++	 * 256 * 48 kHz. simple-audio-card reads this clock's rate at probe and
++	 * passes it to set_sysclk at card init; left at its boot rate (100 MHz
++	 * from the 1200 MHz GPLL), the codec ran from a 100 MHz MCLK, with the
++	 * speaker amplifier on, until the first stream set a real rate.
++	 */
++	assigned-clocks = <&cru SCLK_I2S1>;
++	assigned-clock-rates = <12288000>;
++};
++
+ &rng {
+ 	status = "okay";
+ };
+-- 
+2.43.0
+
