@@ -14,7 +14,7 @@
 # and jokubasver's RK3326 handheld kernel, arkos4clone's 5.10 option),
 # pinned; LightMoss's patches and config fragment are in
 # board/r36s/linux-5.10.
-LIGHTMOSS_LINUX510_VERSION = f2d282f266a4641a8cd4664ae1ebc11cb8bff301
+LIGHTMOSS_LINUX510_VERSION = 453c71de20c0bc736496fc5807dce31461cfc7b4
 # GitHub's archive of the commit (~200 MB) rather than a clone of the whole
 # repository, which CI's disk could not also hold next to the 4.4 kernel's.
 LIGHTMOSS_LINUX510_SITE = $(call github,jokubasver,rockchip-kernel,$(LIGHTMOSS_LINUX510_VERSION))

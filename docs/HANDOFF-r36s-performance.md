@@ -62,7 +62,7 @@ LightMoss is a buildroot 2025.11.3 system that **impersonates a dArkMoss base**,
 ### 3.3 Kernels and CPU clocks
 - **4.4** (default): christianhaitian's `rg351` 4.4.189 BSP with `board/r36s/linux/patches`.
 - **5.10** (optional): `jokubasver/rockchip-kernel` branch `arkos4clone-5.10` at
-  `f2d282f266a4641a8cd4664ae1ebc11cb8bff301` (5.10.252, the arkos4clone kernel; dArkOSen's 5.10 beta is the same
+  `453c71de20c0bc736496fc5807dce31461cfc7b4` (5.10.252, the arkos4clone kernel; dArkOSen's 5.10 beta is the same
   version). Config: `clone_defconfig` plus `board/r36s/linux-5.10/lightmoss-5.10.config`, checked by `check-fragment.sh`.
   Patches in `board/r36s/linux-5.10/patches` (0001–0005: build fix, joypad LED-as-rumble, rk817 gauge resync, the G80CA
   dts `rk3326-r36sclone-linux.dts` and `-panel9-linux.dts`). Images on BOOT: `Image-5.10`, `*-5.10.dtb`.
@@ -320,7 +320,7 @@ Only keep what measurably helps.
   - Watch runs with `gh api repos/MarsInsanity/LightMoss/actions/runs…` (REST only).
 - **Local checks before pushing:**
   - `busybox sh -n` and `shellcheck -s sh -S error` on changed scripts (target shell: busybox ash; post-build: bash).
-  - **Kernel patches:** apply the whole `board/r36s/linux-5.10/patches` series to `f2d282f` with `git apply`. Build the
+  - **Kernel patches:** apply the whole `board/r36s/linux-5.10/patches` series to `453c71de` with `git apply`. Build the
     dtbs with `make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- rockchip/rk3326-r36sclone-linux.dtb`.
   - **Defconfig options** must exist in buildroot 2025.11.3. For a package patch, `make BR2_EXTERNAL=… O=…
     lightmoss_r36s_defconfig` then `make <pkg>-patch` (needs cpio, rsync).
